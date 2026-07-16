@@ -156,6 +156,18 @@ func CGSGetWindowLevel(
     _ outLevel: inout CGWindowLevel
 ) -> CGError
 
+// MARK: - AXUIElement
+
+/// Private, but long-stable (relied on by menu bar utilities for over a decade).
+/// Returns the `CGWindowID` backing an accessibility element, if the system has
+/// a mapping for it. As of macOS 26, this returns a non-success error for most
+/// `AXMenuBarItem` elements, so callers must fall back to geometric matching.
+@_silgen_name("_AXUIElementGetWindow")
+func _AXUIElementGetWindow(
+    _ element: AXUIElement,
+    _ windowID: inout CGWindowID
+) -> AXError
+
 // MARK: - CGWindowList
 
 /// `CGWindowListCreateImageFromArray` is marked obsoleted in the macOS 26 SDK, but the

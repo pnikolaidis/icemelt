@@ -40,6 +40,17 @@ final class SourcePIDCache {
             extrasMenuBar != nil
         }
 
+        /// A Boolean value indicating whether the app has a prohibited
+        /// activation policy.
+        ///
+        /// Prohibited apps that are packaged as an `.app` bundle (such as
+        /// `LSBackgroundOnly` apps) can still own menu bar items, so they
+        /// must not be skipped. Prohibited processes that are not `.app`
+        /// packaged (XPC services, app extensions, daemons) cannot.
+        private var isProhibited: Bool {
+            runningApp.activationPolicy == .prohibited
+        }
+
         /// A Boolean value indicating whether the app is in a valid
         /// state for making accessibility calls.
         var isValidForAccessibility: Bool {
@@ -47,7 +58,7 @@ final class SourcePIDCache {
             // calling AX APIs while the app is an invalid state.
             runningApp.isFinishedLaunching &&
             !runningApp.isTerminated &&
-            runningApp.activationPolicy != .prohibited &&
+            (!isProhibited || runningApp.bundleURL?.pathExtension == "app") &&
             !Bridging.isProcessUnresponsive(processIdentifier)
         }
 
@@ -68,9 +79,17 @@ final class SourcePIDCache {
             }
             guard
                 isValidForAccessibility,
-                let app = AXHelpers.application(for: runningApp),
-                let bar = AXHelpers.extrasMenuBar(for: app)
+                let app = AXHelpers.application(for: runningApp)
             else {
+                return nil
+            }
+            if isProhibited {
+                // Prohibited apps often have no accessibility server, in
+                // which case calls time out instead of returning an error.
+                // Shorten the timeout so they can't stall resolution.
+                AXHelpers.setMessagingTimeout(0.25, for: app)
+            }
+            guard let bar = AXHelpers.extrasMenuBar(for: app) else {
                 return nil
             }
             extrasMenuBar = bar
@@ -78,35 +97,18 @@ final class SourcePIDCache {
         }
     }
 
+    /// An item element in some app's extras menu bar, paired with the app's
+    /// process identifier and the element's live-read frame.
+    private struct ExtrasMenuBarItem {
+        let pid: pid_t
+        let element: UIElement
+        let frame: CGRect
+    }
+
     /// State for the cache.
     private struct State {
         var apps = [CachedApplication]()
         var pids = [CGWindowID: pid_t]()
-
-        /// Returns the latest bounds of the given window after ensuring
-        /// that the bounds are stable (a.k.a. not currently changing).
-        ///
-        /// This method blocks until stable bounds can be determined, or
-        /// until retrieving the bounds for the window fails.
-        private func stableBounds(for window: WindowInfo) -> CGRect? {
-            var cachedBounds = window.bounds
-
-            for n in 1...5 {
-                guard let currentBounds = window.currentBounds() else {
-                    // Failure here means the window probably doesn't
-                    // exist anymore.
-                    return nil
-                }
-                if currentBounds == cachedBounds {
-                    return currentBounds
-                }
-                cachedBounds = currentBounds
-                // Compute the sleep interval from the current attempt.
-                Thread.sleep(forTimeInterval: TimeInterval(n) / 100)
-            }
-
-            return nil
-        }
 
         /// Reorders the cached apps so that those that are confirmed
         /// to have an extras menu bar are first in the array.
@@ -125,34 +127,108 @@ final class SourcePIDCache {
             apps = lhs + rhs
         }
 
-        /// Updates the cached process identifier for the given window.
-        mutating func updatePID(for window: WindowInfo) {
-            guard
-                AXHelpers.isProcessTrusted(),
-                let windowBounds = stableBounds(for: window)
-            else {
-                return
-            }
-
+        /// Collects the item elements of every cached app's extras menu bar,
+        /// with each element's frame read live from the accessibility server.
+        private mutating func collectExtrasMenuBarItems() -> [ExtrasMenuBarItem] {
             partitionApps()
 
+            var items = [ExtrasMenuBarItem]()
             for app in apps {
                 guard let bar = app.getOrCreateExtrasMenuBar() else {
                     continue
                 }
                 for child in AXHelpers.children(for: bar) {
-                    guard AXHelpers.isEnabled(child) else {
-                        continue
-                    }
                     guard
-                        let childFrame = AXHelpers.frame(for: child),
-                        childFrame.center.distance(to: windowBounds.center) <= 1
+                        AXHelpers.isEnabled(child),
+                        let frame = AXHelpers.frame(for: child)
                     else {
                         continue
                     }
-                    pids[window.windowID] = app.processIdentifier
-                    return
+                    items.append(ExtrasMenuBarItem(pid: app.processIdentifier, element: child, frame: frame))
                 }
+            }
+            return items
+        }
+
+        /// Updates the cached process identifiers for the given windows.
+        ///
+        /// Attribution works in two phases. First, each accessibility item is
+        /// asked for its backing window directly (`_AXUIElementGetWindow`) —
+        /// exact when it works, but the system returns failure for most menu
+        /// bar items as of macOS 26. The remainder are matched geometrically:
+        /// every (item, window) pair where the window's horizontal span
+        /// contains the item's midpoint is scored by center distance (with
+        /// width difference as a tiebreaker), and pairs are claimed greedily,
+        /// best score first, so each item and each window is assigned at most
+        /// once. Matching is horizontal only — accessibility frames are
+        /// vertically centered in the bar while item windows span its full
+        /// height, so comparing vertical geometry would only add noise.
+        mutating func updatePIDs(for windows: [WindowInfo]) {
+            guard AXHelpers.isProcessTrusted() else {
+                return
+            }
+
+            // Re-read window bounds so we match against current positions.
+            // A window that no longer exists is dropped.
+            let unresolved: [(windowID: CGWindowID, bounds: CGRect)] = windows.compactMap { window in
+                guard pids[window.windowID] == nil else {
+                    return nil
+                }
+                guard let bounds = window.currentBounds() else {
+                    return nil
+                }
+                return (window.windowID, bounds)
+            }
+            if unresolved.isEmpty {
+                return
+            }
+
+            let items = collectExtrasMenuBarItems()
+
+            var unclaimedWindowIDs = Set(unresolved.map { $0.windowID })
+            var unclaimedItemIndices = Set(items.indices)
+
+            // Phase 1: exact resolution via the backing window, where the
+            // system provides one.
+            for index in items.indices {
+                guard let windowID = AXHelpers.windowID(for: items[index].element) else {
+                    continue
+                }
+                if unclaimedWindowIDs.remove(windowID) != nil {
+                    pids[windowID] = items[index].pid
+                    unclaimedItemIndices.remove(index)
+                }
+            }
+
+            // Phase 2: score all legal geometric pairings.
+            var scoredPairs = [(score: CGFloat, itemIndex: Int, windowID: CGWindowID)]()
+            for (windowID, bounds) in unresolved where unclaimedWindowIDs.contains(windowID) {
+                for index in unclaimedItemIndices {
+                    let frame = items[index].frame
+                    guard bounds.minX <= frame.midX, frame.midX <= bounds.maxX else {
+                        continue
+                    }
+                    let score = abs(bounds.midX - frame.midX) * 10 + abs(bounds.width - frame.width)
+                    scoredPairs.append((score, index, windowID))
+                }
+            }
+
+            // Phase 3: claim pairs greedily, best score first, one window
+            // per item and one item per window.
+            for pair in scoredPairs.sorted(by: { $0.score < $1.score }) {
+                guard
+                    unclaimedWindowIDs.contains(pair.windowID),
+                    unclaimedItemIndices.contains(pair.itemIndex)
+                else {
+                    continue
+                }
+                pids[pair.windowID] = items[pair.itemIndex].pid
+                unclaimedWindowIDs.remove(pair.windowID)
+                unclaimedItemIndices.remove(pair.itemIndex)
+            }
+
+            if !unclaimedWindowIDs.isEmpty {
+                Logger.default.warning("Unable to attribute source PIDs for windows \(String(describing: unclaimedWindowIDs.sorted()))")
             }
         }
     }
@@ -219,12 +295,20 @@ final class SourcePIDCache {
     /// Returns the cached process identifier for the given window,
     /// updating the cache if needed.
     func pid(for window: WindowInfo) -> pid_t? {
+        pids(for: [window])[window.windowID]
+    }
+
+    /// Returns the cached process identifiers for the given windows,
+    /// updating the cache if needed.
+    ///
+    /// Windows whose source process cannot be determined are omitted
+    /// from the result.
+    func pids(for windows: [WindowInfo]) -> [CGWindowID: pid_t] {
         state.withLock { state in
-            if let pid = state.pids[window.windowID] {
-                return pid
+            state.updatePIDs(for: windows)
+            return windows.reduce(into: [:]) { result, window in
+                result[window.windowID] = state.pids[window.windowID]
             }
-            state.updatePID(for: window)
-            return state.pids[window.windowID]
         }
     }
 }
