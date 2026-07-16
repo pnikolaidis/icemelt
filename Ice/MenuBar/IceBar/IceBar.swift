@@ -342,23 +342,9 @@ private struct IceBarContentView: View {
 
     @ViewBuilder
     private var content: some View {
-        if !ScreenCapture.cachedCheckPermissions() {
-            HStack {
-                Text("The Ice Bar requires screen recording permissions.")
-
-                Button {
-                    menuBarManager.section(withName: section)?.hide()
-                    appState.navigationState.settingsNavigationIdentifier = .advanced
-                    appState.activate(withPolicy: .regular)
-                    appState.openWindow(.settings)
-                } label: {
-                    Text("Open Ice Settings")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.link)
-            }
-            .padding(.horizontal, 10)
-        } else if menuBarManager.isMenuBarHiddenBySystemUserDefaults {
+        // Note: missing Screen Recording permission no longer blocks the
+        // Ice Bar — the image cache falls back to app icons.
+        if menuBarManager.isMenuBarHiddenBySystemUserDefaults {
             Text("Ice cannot display menu bar items for automatically hidden menu bars")
                 .padding(.horizontal, 10)
         } else if itemManager.itemCache.managedItems.isEmpty {
