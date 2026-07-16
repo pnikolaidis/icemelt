@@ -216,15 +216,91 @@ final class MenuBarItemImageCache: ObservableObject {
         return individualResult
     }
 
+    /// Renders a stand-in image for an item whose window can't be captured,
+    /// drawing the source app's icon centered in a canvas of the item's size.
+    ///
+    /// Used when Screen Recording permission is missing, or when capture
+    /// fails for an individual item (both common on macOS 26).
+    private nonisolated func fallbackImage(for item: MenuBarItem, scale: CGFloat) -> CapturedImage? {
+        guard let icon = (item.sourceApplication ?? item.owningApplication)?.icon else {
+            return nil
+        }
+
+        var itemSize = item.bounds.size
+        if itemSize.width < 1 || itemSize.height < 1 {
+            itemSize = CGSize(width: 30, height: 24)
+        }
+
+        let width = Int(itemSize.width * scale)
+        let height = Int(itemSize.height * scale)
+        guard
+            width > 0, height > 0,
+            let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+            let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else {
+            return nil
+        }
+
+        let iconSide = min(itemSize.height * 0.65, itemSize.width) * scale
+        var proposedRect = CGRect(x: 0, y: 0, width: iconSide, height: iconSide)
+        guard let iconImage = icon.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil) else {
+            return nil
+        }
+
+        context.draw(
+            iconImage,
+            in: CGRect(
+                x: (CGFloat(width) - iconSide) / 2,
+                y: (CGFloat(height) - iconSide) / 2,
+                width: iconSide,
+                height: iconSide
+            )
+        )
+
+        guard let image = context.makeImage() else {
+            return nil
+        }
+        return CapturedImage(cgImage: image, scale: scale)
+    }
+
     /// Captures the images of the menu bar items in the given section and returns
     /// a dictionary containing the images, keyed by their menu bar item tags.
-    private func captureImages(for section: MenuBarSection.Name, scale: CGFloat, appState: AppState) async -> [MenuBarItemTag: CapturedImage] {
+    ///
+    /// Items that can't be captured (individually, or wholesale when `canCapture`
+    /// is `false`) fall back to a rendering of their source app's icon.
+    private func captureImages(for section: MenuBarSection.Name, scale: CGFloat, appState: AppState, canCapture: Bool) async -> [MenuBarItemTag: CapturedImage] {
         let items = await appState.itemManager.itemCache.managedItems(for: section)
-        let captureResult = await captureImages(of: items, scale: scale, appState: appState)
-        if !captureResult.excluded.isEmpty {
-            logger.error("Some items failed capture: \(captureResult.excluded, privacy: .public)")
+
+        var images = [MenuBarItemTag: CapturedImage]()
+        var excluded = items
+
+        if canCapture {
+            let captureResult = await captureImages(of: items, scale: scale, appState: appState)
+            images = captureResult.images
+            excluded = captureResult.excluded
         }
-        return captureResult.images
+
+        var failed = [MenuBarItem]()
+        for item in excluded {
+            if let fallback = fallbackImage(for: item, scale: scale) {
+                images[item.tag] = fallback
+            } else {
+                failed.append(item)
+            }
+        }
+        if !failed.isEmpty {
+            logger.error("Some items failed capture and fallback: \(failed, privacy: .public)")
+        }
+
+        return images
     }
 
     // MARK: Update Cache
@@ -232,17 +308,23 @@ final class MenuBarItemImageCache: ObservableObject {
     /// Updates the cache for the given sections, without checking whether
     /// caching is necessary.
     func updateCacheWithoutChecks(sections: [MenuBarSection.Name]) async {
-        guard
-            let appState,
-            await appState.hasPermission(.screenRecording)
-        else {
+        guard let appState else {
             return
         }
 
-        guard
-            let displayID = await appState.itemManager.itemCache.displayID,
-            let screen = NSScreen.screens.first(where: { $0.displayID == displayID })
-        else {
+        // Without Screen Recording, we can't capture pixel-accurate images,
+        // but we can still populate the cache with app-icon fallbacks.
+        let canCapture = await appState.hasPermission(.screenRecording)
+
+        // The active menu bar display can fail to resolve in some
+        // configurations (e.g. "Displays have separate Spaces" disabled).
+        // Fall back to the main screen rather than skipping the cache.
+        let resolvedScreen: NSScreen? = if let displayID = await appState.itemManager.itemCache.displayID {
+            NSScreen.screens.first { $0.displayID == displayID } ?? NSScreen.main
+        } else {
+            NSScreen.main
+        }
+        guard let screen = resolvedScreen else {
             return
         }
 
@@ -254,7 +336,7 @@ final class MenuBarItemImageCache: ObservableObject {
                 continue
             }
 
-            let sectionImages = await captureImages(for: section, scale: scale, appState: appState)
+            let sectionImages = await captureImages(for: section, scale: scale, appState: appState, canCapture: canCapture)
 
             guard !sectionImages.isEmpty else {
                 logger.warning("Failed item image cache for \(section.logString, privacy: .public)")
@@ -324,11 +406,12 @@ final class MenuBarItemImageCache: ObservableObject {
 
     /// Returns a Boolean value that indicates whether caching menu bar items
     /// failed for the given section.
+    ///
+    /// Missing Screen Recording permission is not itself a failure — the
+    /// cache falls back to app icons. Failure means the section has items
+    /// but not a single image could be produced for them.
     @MainActor
     func cacheFailed(for section: MenuBarSection.Name) -> Bool {
-        guard ScreenCapture.cachedCheckPermissions() else {
-            return true
-        }
         let items = appState?.itemManager.itemCache[section] ?? []
         guard !items.isEmpty else {
             return false
