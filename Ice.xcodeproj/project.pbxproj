@@ -319,7 +319,6 @@
 				COPY_PHASE_STRIP = NO;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = K2ATHQPJDP;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -337,8 +336,8 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 Jordan Baird";
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2023–2026 Jordan Baird and IceMelt contributors";
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -385,7 +384,6 @@
 				COPY_PHASE_STRIP = NO;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = K2ATHQPJDP;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -397,8 +395,8 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2025 Jordan Baird";
-				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2023–2026 Jordan Baird and IceMelt contributors";
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
@@ -434,8 +432,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = "0.11.13-dev.2a";
-				PRODUCT_BUNDLE_IDENTIFIER = com.jordanbaird.Ice;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.pnikolaidis.icemelt;
+				PRODUCT_NAME = IceMelt;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -467,8 +465,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = "0.11.13-dev.2a";
-				PRODUCT_BUNDLE_IDENTIFIER = com.jordanbaird.Ice;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.pnikolaidis.icemelt;
+				PRODUCT_NAME = IceMelt;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -487,7 +485,7 @@
 				INFOPLIST_FILE = MenuBarItemService/Resources/Info.plist;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.jordanbaird.Ice.MenuBarItemService;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pnikolaidis.icemelt.MenuBarItemService;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SKIP_INSTALL = YES;
@@ -513,7 +511,7 @@
 				INFOPLIST_FILE = MenuBarItemService/Resources/Info.plist;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.jordanbaird.Ice.MenuBarItemService;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pnikolaidis.icemelt.MenuBarItemService;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SKIP_INSTALL = YES;
