@@ -156,6 +156,18 @@ func CGSGetWindowLevel(
     _ outLevel: inout CGWindowLevel
 ) -> CGError
 
+// MARK: - CGWindowList
+
+/// `CGWindowListCreateImageFromArray` is marked obsoleted in the macOS 26 SDK, but the
+/// symbol still exists and remains the only way to capture offscreen menu bar items
+/// (ScreenCaptureKit cannot). Bridged here so we can call it with a 26.0 deployment target.
+@_silgen_name("CGWindowListCreateImageFromArray")
+func WindowListCreateImageFromArray(
+    _ screenBounds: CGRect,
+    _ windowArray: CFArray,
+    _ imageOption: CGWindowImageOption
+) -> Unmanaged<CGImage>?
+
 // MARK: - ProcessSerialNumber
 
 @_silgen_name("GetProcessForPID")

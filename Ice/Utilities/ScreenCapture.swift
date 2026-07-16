@@ -77,8 +77,9 @@ enum ScreenCapture {
         }
         let bounds = screenBounds ?? .null
         // ScreenCaptureKit doesn't support capturing images of offscreen menu bar
-        // items, so we unfortunately have to use the deprecated CGWindowList API.
-        return CGImage(windowListFromArrayScreenBounds: bounds, windowArray: array, imageOption: option)
+        // items, so we unfortunately have to use the deprecated CGWindowList API,
+        // bridged through Shims.swift since the SDK marks it obsoleted as of 26.0.
+        return WindowListCreateImageFromArray(bounds, array, option)?.takeRetainedValue()
     }
 
     /// Captures an image of a window.

@@ -16,8 +16,7 @@ struct AboutSettingsPane: View {
     }
 
     private var contributeURL: URL {
-        // swiftlint:disable:next force_unwrapping
-        URL(string: "https://github.com/jordanbaird/Ice")!
+        URL(string: "https://github.com/pnikolaidis/icemelt")!
     }
 
     private var issuesURL: URL {
@@ -25,7 +24,6 @@ struct AboutSettingsPane: View {
     }
 
     private var donateURL: URL {
-        // swiftlint:disable:next force_unwrapping
         URL(string: "https://icemenubar.app/Donate")!
     }
 

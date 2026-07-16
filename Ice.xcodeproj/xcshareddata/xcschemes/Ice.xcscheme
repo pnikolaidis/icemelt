@@ -15,7 +15,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "716683292A767E6A006ABF84"
-               BuildableName = "Ice.app"
+               BuildableName = "IceMelt.app"
                BlueprintName = "Ice"
                ReferencedContainer = "container:Ice.xcodeproj">
             </BuildableReference>
@@ -44,7 +44,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "716683292A767E6A006ABF84"
-            BuildableName = "Ice.app"
+            BuildableName = "IceMelt.app"
             BlueprintName = "Ice"
             ReferencedContainer = "container:Ice.xcodeproj">
          </BuildableReference>
@@ -61,7 +61,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "716683292A767E6A006ABF84"
-            BuildableName = "Ice.app"
+            BuildableName = "IceMelt.app"
             BlueprintName = "Ice"
             ReferencedContainer = "container:Ice.xcodeproj">
          </BuildableReference>

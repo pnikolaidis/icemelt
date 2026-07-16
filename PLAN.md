@@ -30,16 +30,19 @@ distributed outside the Mac App Store (the app cannot be sandboxed).
 
 ## Phase 0 — Repo & fork hygiene
 
-- [ ] Push all branches/tags to `pnikolaidis/icemelt` (blocked on `gh auth refresh -s workflow`).
-- [ ] Create `melt` working branch from `upstream/macos-26`; merge `main`'s trailing
-      doc/template commits if useful.
-- [ ] Rename target/product to IceMelt; new bundle IDs for app + `MenuBarItemService`
-      XPC (service name is referenced in code — `com.jordanbaird.Ice.MenuBarItemService`).
-- [ ] Neutralize Sparkle: remove `SUFeedURL`/`SUPublicEDKey` until we host our own
-      appcast (GitHub Releases + generated appcast later).
-- [ ] CI: GitHub Actions — build + SwiftLint on every PR (workflow file already exists
-      upstream; extend to build the app and run tests once they exist).
-- [ ] Set deployment target per decision #2; delete dead `#available` branches.
+- [x] Push all branches/tags to `pnikolaidis/icemelt`.
+- [x] Create `melt` working branch from `upstream/macos-26`; merge `main`'s trailing
+      doc/template commits.
+- [x] Rename product to IceMelt; new bundle IDs for app (`com.pnikolaidis.icemelt`) +
+      `MenuBarItemService` XPC (service name constant updated in `Shared/Services/`).
+      Target/scheme/folder names still say "Ice" — cosmetic, rename later if desired.
+- [x] Neutralize Sparkle: `SUFeedURL`/`SUPublicEDKey` removed, automatic checks
+      disabled until we host our own appcast (GitHub Releases + generated appcast later).
+- [x] CI: GitHub Actions `ci.yml` — SwiftLint (container) + Release build on `macos-26`
+      runner; replaces upstream's stale `lint.yml`.
+- [x] Deployment target raised to 26.0. Required bridging
+      `CGWindowListCreateImageFromArray` via `@_silgen_name` (obsoleted in the 26 SDK
+      but still the only way to capture offscreen items). `#available` cleanup deferred.
 - verify: app builds, launches, onboards permissions, basic hide/show works on Tahoe.
 
 ## Phase 1 — Make it work on Tahoe (the stable release upstream never shipped)
