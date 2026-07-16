@@ -3,6 +3,7 @@
 //  Ice
 //
 
+import CoreGraphics
 import Foundation
 import OSLog
 
@@ -69,6 +70,26 @@ extension MenuBarItemService {
                 } else {
                     logger.error("Source PID request returned invalid response \(String(describing: response))")
                     continuation.resume(returning: nil)
+                }
+            }
+        }
+
+        /// Returns the source process identifiers for the given windows.
+        ///
+        /// Windows whose source process cannot be determined are omitted
+        /// from the result.
+        func sourcePIDs(for windows: [WindowInfo]) async -> [CGWindowID: pid_t] {
+            await withCheckedContinuation { continuation in
+                guard let response = session.send(request: .sourcePIDs(windows)) else {
+                    logger.error("Source PIDs request returned nil")
+                    continuation.resume(returning: [:])
+                    return
+                }
+                if case .sourcePIDs(let pids) = response {
+                    continuation.resume(returning: pids)
+                } else {
+                    logger.error("Source PIDs request returned invalid response \(String(describing: response))")
+                    continuation.resume(returning: [:])
                 }
             }
         }

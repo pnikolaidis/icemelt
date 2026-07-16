@@ -244,13 +244,11 @@ extension MenuBarItem {
     /// source pid retrieval for macOS 26.
     @available(macOS 26.0, *)
     private static func getMenuBarItemsExperimental(on display: CGDirectDisplayID?, option: ListOption) async -> [MenuBarItem] {
-        var items = [MenuBarItem]()
-        for window in getMenuBarItemWindows(on: display, option: option) {
-            let sourcePID = await MenuBarItemService.Connection.shared.sourcePID(for: window)
-            let item = MenuBarItem(uncheckedItemWindow: window, sourcePID: sourcePID)
-            items.append(item)
+        let windows = getMenuBarItemWindows(on: display, option: option)
+        let sourcePIDs = await MenuBarItemService.Connection.shared.sourcePIDs(for: windows)
+        return windows.map { window in
+            MenuBarItem(uncheckedItemWindow: window, sourcePID: sourcePIDs[window.windowID])
         }
-        return items
     }
 
     /// Creates and returns a list of menu bar items, defaulting to the
