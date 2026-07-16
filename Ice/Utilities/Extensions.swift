@@ -517,9 +517,10 @@ extension NSScreen {
 
     /// The display identifier of the screen.
     var displayID: CGDirectDisplayID {
-        // Value and type are guaranteed here, so force casting is okay.
-        // swiftlint:disable:next force_cast
-        deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as! CGDirectDisplayID
+        // The value can be transiently missing during display
+        // reconfiguration; fall back to the main display rather
+        // than crashing.
+        deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? CGMainDisplayID()
     }
 
     /// A Boolean value that indicates whether the screen has a notch.
