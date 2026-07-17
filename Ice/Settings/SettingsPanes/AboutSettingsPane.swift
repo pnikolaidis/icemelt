@@ -98,14 +98,17 @@ struct AboutSettingsPane: View {
 
     @ViewBuilder
     private var updatesSection: some View {
-        IceSection(options: .hasDividers) {
-            automaticallyCheckForUpdates
-            automaticallyDownloadUpdates
-            if updatesManager.canCheckForUpdates {
+        // Hidden until an update feed is configured — no UI for
+        // unimplemented features. Reappears automatically once the
+        // updater has a feed to check.
+        if updatesManager.canCheckForUpdates {
+            IceSection(options: .hasDividers) {
+                automaticallyCheckForUpdates
+                automaticallyDownloadUpdates
                 checkForUpdates
             }
+            .frame(maxWidth: 600)
         }
-        .frame(maxWidth: 600)
     }
 
     @ViewBuilder
