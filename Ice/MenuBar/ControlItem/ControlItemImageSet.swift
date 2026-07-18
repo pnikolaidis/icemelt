@@ -14,6 +14,7 @@ struct ControlItemImageSet: Codable, Hashable, Identifiable {
         case dot = "Dot"
         case ellipsis = "Ellipsis"
         case iceCube = "Ice Cube"
+        case iceMelt = "IceMelt"
         case sunglasses = "Sunglasses"
         case custom = "Custom"
     }
@@ -38,13 +39,16 @@ struct ControlItemImageSet: Codable, Hashable, Identifiable {
 extension ControlItemImageSet {
     /// The default image set for the Ice icon.
     static let defaultIceIcon = ControlItemImageSet(
-        name: .dot,
-        hidden: .catalog("DotFill"),
-        visible: .catalog("DotStroke")
+        name: .iceMelt,
+        image: .catalog("IceMeltDroplet")
     )
 
     /// The image sets that the user can choose to display in the Ice icon.
     static let userSelectableIceIcons = [
+        ControlItemImageSet(
+            name: .iceMelt,
+            image: .catalog("IceMeltDroplet")
+        ),
         ControlItemImageSet(
             name: .arrow,
             hidden: .symbol("arrowshape.left.fill"),
