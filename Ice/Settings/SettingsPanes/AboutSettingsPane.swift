@@ -90,6 +90,9 @@ struct AboutSettingsPane: View {
                     Text(Constants.copyrightString)
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary.opacity(0.67))
+
+                    Link("scratchitchsoftware.com/icemelt", destination: URL(string: "https://scratchitchsoftware.com/icemelt")!)
+                        .font(.system(size: 14))
                 }
                 .fontWeight(.medium)
             }
