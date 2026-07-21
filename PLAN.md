@@ -27,6 +27,12 @@ distributed outside the Mac App Store (the app cannot be sandboxed).
    and **remove or repoint the Sparkle update feed** (`SUFeedURL` currently points at
    jordanbaird's appcast — shipping with it would auto-"update" our users back to
    upstream Ice). GPL-3.0 retained; keep upstream attribution and license headers.
+5. **Updates: keep Sparkle (fleet decision, 2026-07).** Scratch Itch's closed-source
+   apps standardize on a custom appcast self-updater (cmdtab's `UpdateChecker.swift`
+   is the reference implementation); IceMelt, as the open-source (GPL-3.0) project,
+   stays on upstream's Sparkle — now repointed to our own feed
+   (`SUFeedURL` = `https://pnikolaidis.github.io/icemelt/appcast.xml`) with our own
+   EdDSA key. Do not port the custom updater here.
 
 ## Phase 0 — Repo & fork hygiene
 
@@ -138,8 +144,9 @@ Ordered by upstream 👍, effort-weighted:
 - macOS 27 compatibility watch (upstream #965/#954; Hidden Bar's #360 shows the
   length-inflation trick itself may need rework on 27 — if so, MikanBar-style
   reveal-on-demand becomes the hedge).
-- Own release pipeline: notarized DMG via GitHub Releases, Homebrew cask, self-hosted
-  Sparkle appcast with our own EdDSA key.
+- Own release pipeline: notarized DMG via GitHub Releases and a self-hosted Sparkle
+  appcast with our own EdDSA key (both live — see guiding decision 5); Homebrew cask
+  still pending.
 - Track upstream: cherry-pick from jordanbaird/Ice if it revives.
 
 ## Sequencing summary
