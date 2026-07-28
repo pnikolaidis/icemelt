@@ -50,6 +50,7 @@ distributed outside the Mac App Store (the app cannot be sandboxed).
       `CGWindowListCreateImageFromArray` via `@_silgen_name` (obsoleted in the 26 SDK
       but still the only way to capture offscreen items). `#available` cleanup deferred.
 - verify: app builds, launches, onboards permissions, basic hide/show works on Tahoe.
+- **Status: COMPLETE** (merged via PR #1; Developer ID signing added after).
 
 ## Phase 1 — Make it work on Tahoe (the stable release upstream never shipped)
 
@@ -80,6 +81,9 @@ version for Tahoe?"; most top bugs are Tahoe symptoms.
   `docs/VERIFY.md`.
 - **Milestone: tag v0.12.0-melt.1, publish a notarized release.** This alone leapfrogs
   upstream for most users.
+- **Status: COMPLETE** — v0.12.0-melt.1 shipped 2026-07-17; v0.12.0-melt.2 (automatic
+  updates via Sparkle feed + droplet icon) shipped 2026-07-18. See docs/STATUS.md for
+  current state and outstanding work.
 
 ## Phase 2 — De-risk the codebase (tests + decoupling)
 
