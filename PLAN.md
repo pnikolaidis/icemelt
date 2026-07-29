@@ -41,7 +41,7 @@ distributed outside the Mac App Store (the app cannot be sandboxed).
       doc/template commits.
 - [x] Rename product to IceMelt; new bundle IDs for app (`com.pnikolaidis.icemelt`) +
       `MenuBarItemService` XPC (service name constant updated in `Shared/Services/`).
-      Target/scheme/folder names still say "Ice" — tracked as issue #3.
+      Target/scheme/folder names renamed to IceMelt later, in issue #3.
 - [x] Neutralize Sparkle: `SUFeedURL`/`SUPublicEDKey` removed, automatic checks
       disabled until we host our own appcast (GitHub Releases + generated appcast later).
       *(Superseded 2026-07-18: both keys are now set to IceMelt's own feed and EdDSA
