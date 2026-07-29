@@ -1,5 +1,5 @@
 included:
-  - Ice
+  - IceMelt
 
 disabled_rules:
   - cyclomatic_complexity
@@ -56,7 +56,7 @@ file_header:
   required_pattern: |-
     //
     //  SWIFTLINT_CURRENT_FILENAME
-    //  Ice
+    //  IceMelt
     //
 
 modifier_order:

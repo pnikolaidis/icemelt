@@ -22,40 +22,37 @@ Snapshot for resuming work. Last updated 2026-07-29.
 - **Plan of record**: `PLAN.md` (phases), `docs/VERIFY.md` (manual regression checklist).
 - Phase 0 (fork hygiene) and Phase 1 (Tahoe correctness) are **complete and verified
   on-device**; the milestone releases shipped.
-- **Naming**: user-facing strings all say "IceMelt". The Xcode project (`Ice.xcodeproj`),
-  targets, scheme, source folders, and most type names (`IceBar`, `IceSection`,
-  `IceWindow`, …) still say "Ice" — issue
-  [#3](https://github.com/pnikolaidis/icemelt/issues/3). Persisted identifiers
-  (`UserDefaults` keys such as `ShowIceIcon`/`UseIceBar`, the `Ice.ControlItem.*` status
-  item autosave names, and `HotkeyAction` raw values) also still say "Ice" and **cannot
-  be renamed without a settings migration** — renaming them silently resets users'
-  configuration.
+- **Naming (issue #3, done)**: project is `IceMelt.xcodeproj`, scheme/target `IceMelt`,
+  source folder `IceMelt/`; all type names and file headers say IceMelt. Build with
+  `xcodebuild -project IceMelt.xcodeproj -scheme IceMelt`.
+  **Deliberately frozen at their "Ice" spellings** because they are persisted on disk and
+  renaming them would silently reset users' settings: `UserDefaults` keys
+  (`ShowIceIcon`, `IceIcon`, `CustomIceIconIsTemplate`, `UseIceBar`, `IceBarLocation`),
+  the `Ice.ControlItem.*` status-item autosave names, `HotkeyAction`'s `"EnableIceBar"`
+  raw value, and the "Ice Cube" icon name plus its `IceCube*` assets (upstream's
+  artwork, kept as an icon option). Each site carries a comment saying so.
 - **Untracked in the working tree** (deliberately not committed): `IceMelt app icon
   design.zip` (designer package), `dist/` (build output), `claude.md` (workflow rules —
   same file as `CLAUDE.md` on this case-insensitive filesystem).
 
 ## Outstanding — Claude (next session)
 
-1. **Finish the "Ice" → "IceMelt" rename** (issue #3) — rename the Xcode project,
-   scheme, targets, source folders, and type names; keep persisted keys and autosave
-   names as-is (or add an explicit migration) and comment why. Regression-prone: do it
-   on its own branch with a control build.
-2. **Update the copyright** (issue #4) — verify `INFOPLIST_KEY_NSHumanReadableCopyright`
+1. **Update the copyright** (issue #4) — verify `INFOPLIST_KEY_NSHumanReadableCopyright`
    and license headers read "Scratch Itch Software" with upstream attribution.
-3. **Peter's minor bugs** — waiting on issues to be filed (see below); triage and fix.
-4. **Replace the app icon** — `AppIcon.appiconset` still contains upstream Ice's cube
+2. **Peter's minor bugs** — waiting on issues to be filed (see below); triage and fix.
+3. **Replace the app icon** — `AppIcon.appiconset` still contains upstream Ice's cube
    artwork. The design package (`IceMelt app icon design.zip`, repo root, untracked)
    includes ready `IceMelt-light.iconset`/`IceMelt-dark.iconset`; convert and install.
-5. **Phase 2 (PLAN.md)** — add a test target; extract and unit-test pure logic
+4. **Phase 2 (PLAN.md)** — add a test target; extract and unit-test pure logic
    (matching/scoring in SourcePIDCache, rehide strategies, hotkey encoding, config
    migration); characterization tests for MenuBarItemManager decision logic; add test
    job to CI.
-6. **Phase 3** — canonical menu bar order + reconciliation, status-item autosave guard,
+5. **Phase 3** — canonical menu bar order + reconciliation, status-item autosave guard,
    crash-safe moves, occlusion detection, first-class Screen-Recording-optional mode.
-7. **Phase 4** — profiles (port stale `upstream/profiles`), conditional visibility
+6. **Phase 4** — profiles (port stale `upstream/profiles`), conditional visibility
    triggers, per-display behavior, settings export, notch-hiding appearance preset,
    URL-scheme/Raycast surface.
-8. **Deferred cleanups**: dead `#available(macOS <26)` branches; two-state droplet icon
+7. **Deferred cleanups**: dead `#available(macOS <26)` branches; two-state droplet icon
    (needs filled/hollow pair from designer); decide whether icon design sources get
    committed to the repo; macOS 27 beta watch (upstream #965/#954); Homebrew cask.
 
@@ -66,11 +63,9 @@ Snapshot for resuming work. Last updated 2026-07-29.
 2. **Back up the login keychain** (contains the Sparkle EdDSA private key — losing it
    orphans the update channel).
 3. Optional decisions when convenient:
-   - Want the app icon swapped to the droplet artwork? (Task 4 above — say go.)
+   - Want the app icon swapped to the droplet artwork? (Task 3 above — say go.)
    - Ask the designer for a filled/hollow droplet pair for hidden/visible states?
    - Should the icon design sources live in the repo?
-   - Should the rename (task 1) also migrate persisted settings keys, or leave them
-     frozen at their "Ice" spellings for compatibility?
 
 ## How to resume
 
