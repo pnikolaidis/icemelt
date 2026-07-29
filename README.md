@@ -1,5 +1,5 @@
 <div align="center">
-    <img src="Ice/Resources/Assets.xcassets/AppIcon.appiconset/icon_256x256.png" width=200 height=200>
+    <img src="IceMelt/Resources/Assets.xcassets/AppIcon.appiconset/icon_256x256.png" width=200 height=200>
     <h1>IceMelt</h1>
 </div>
 
@@ -39,13 +39,10 @@ Requires Xcode 26 or later.
 ```sh
 git clone https://github.com/pnikolaidis/icemelt.git
 cd icemelt
-xcodebuild -project Ice.xcodeproj -scheme Ice -configuration Release build
+xcodebuild -project IceMelt.xcodeproj -scheme IceMelt -configuration Release build
 ```
 
 Unsigned local builds are fine for development. Distributable builds are signed with a Developer ID certificate and notarized.
-
-> [!NOTE]
-> The Xcode project, scheme, targets, source folders, and many type names still read `Ice` — leftovers from the fork that have not been renamed yet. Tracked in [#3](https://github.com/pnikolaidis/icemelt/issues/3).
 
 ## What IceMelt changes
 
