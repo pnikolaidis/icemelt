@@ -5,7 +5,7 @@ menu bar mechanics (they depend on live OS behavior), so this checklist is the
 regression gate. Check items off in the PR or release notes.
 
 ## Setup
-- [ ] Build Release (`xcodebuild -scheme Ice -configuration Release`), launch `IceMelt.app`.
+- [ ] Build Release (`xcodebuild -scheme IceMelt -configuration Release`), launch `IceMelt.app`.
 - [ ] Both `IceMelt` and `MenuBarItemService` processes running (`pgrep -lx IceMelt MenuBarItemService`).
 - [ ] No errors in logs: `/usr/bin/log show --last 5m --predicate 'subsystem == "com.pnikolaidis.icemelt"' | grep -iE "error|fail"`.
 
