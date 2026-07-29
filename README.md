@@ -82,9 +82,9 @@ Phase-by-phase plans live in [`PLAN.md`](PLAN.md); the current snapshot is in [`
 - [x] Menu bar shadow
 - [x] Menu bar border
 - [x] Custom menu bar shapes (rounded and/or split)
+- [x] Different settings for light/dark mode ("dynamic appearance")
 - [ ] Remove background behind menu bar
 - [ ] Rounded screen corners
-- [ ] Different settings for light/dark mode
 - [ ] Full-black menu bar to hide the notch
 
 ### Hotkeys
@@ -115,27 +115,31 @@ If you are on macOS 14 or 15, [upstream Ice 0.11.x](https://github.com/jordanbai
 
 ## Gallery
 
-> The screenshots below are from upstream Ice. The interface is largely unchanged in IceMelt.
-
 #### Show hidden menu bar items below the menu bar
 
-![IceMelt Bar](https://github.com/user-attachments/assets/f1429589-6186-4e1b-8aef-592219d49b9b)
+The IceMelt Bar holds everything from the hidden section, so the menu bar itself stays short.
+
+![IceMelt Bar](docs/images/icemelt-bar.png)
 
 #### Drag-and-drop interface to arrange menu bar items
 
-![Menu Bar Layout](https://github.com/user-attachments/assets/095442ba-f2d0-4bb4-9632-91e26ef8d45b)
+![Menu Bar Layout](docs/images/menu-bar-layout.png)
+
+#### Search menu bar items
+
+Fuzzy search across every item, visible or hidden; Enter clicks the match.
+
+![Menu Bar Item Search](docs/images/menu-bar-item-search.png)
 
 #### Customize the menu bar's appearance
 
-![Menu Bar Appearance](https://github.com/user-attachments/assets/8c22c185-c3d2-49bb-971e-e1fc17df04b3)
+Tint, shadow, border, and custom menu bar shapes, with separate settings for light and dark mode.
 
-#### Menu bar item search
+![Menu Bar Appearance](docs/images/menu-bar-appearance.png)
 
-![Menu Bar Item Search](https://github.com/user-attachments/assets/d1a7df3a-4989-4077-a0b1-8e7d5a1ba5b8)
+#### Settings
 
-#### Custom menu bar item spacing
-
-![Menu Bar Item Spacing](https://github.com/user-attachments/assets/b196aa7e-184a-4d4c-b040-502f4aae40a6)
+![General Settings](docs/images/settings-general.png)
 
 ## Contributing
 
