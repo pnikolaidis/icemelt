@@ -7,7 +7,7 @@ body:
     attributes:
       label: Search for Similar Reports
       description: |
-        Please use the search feature on the repository's [Issues](https://github.com/jordanbaird/Ice/issues) page to see if a report already exists for the bug you encountered. Make sure to include both open and closed issues in your search.
+        Please use the search feature on the repository's [Issues](https://github.com/pnikolaidis/icemelt/issues) page to see if a report already exists for the bug you encountered. Make sure to include both open and closed issues in your search.
 
         **Important**: Only submit a new issue if the bug you encountered hasn't been reported in an existing open issue, or if a regression has occurred with a previously closed issue.
       options:
@@ -34,14 +34,14 @@ body:
     id: app_version
     attributes:
       label: App Version
-      placeholder: e.g. 1.2.3
+      placeholder: e.g. 0.12.0-melt.2
     validations:
       required: true
   - type: input
     id: macos_version
     attributes:
       label: macOS Version
-      placeholder: e.g. 15.3.2
+      placeholder: e.g. 26.1
     validations:
       required: true
   - type: textarea
