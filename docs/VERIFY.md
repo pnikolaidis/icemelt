@@ -15,7 +15,7 @@ regression gate. Check items off in the PR or release notes.
 - [ ] Quit and relaunch a third-party menu bar app: its item keeps its section.
 
 ## Hide/show mechanics
-- [ ] Click the Ice icon: hidden section collapses/expands.
+- [ ] Click the IceMelt icon: hidden section collapses/expands.
 - [ ] Option-click: always-hidden section reveals (if enabled).
 - [ ] Show on hover, show on scroll work when enabled.
 - [ ] Auto-rehide (timed and smart) re-hides.
@@ -27,10 +27,10 @@ regression gate. Check items off in the PR or release notes.
       com.pnikolaidis.icemelt`), relaunch — layout pane shows **app icons**, not
       "Unable to display menu bar items". Re-grant afterward.
 
-## Ice Bar
-- [ ] Enable Ice Bar; click the Ice icon: pill appears below the menu bar with items.
+## IceMelt Bar
+- [ ] Enable the IceMelt Bar; click the IceMelt icon: pill appears below the menu bar with items.
 - [ ] Items are clickable (left and right click forward correctly).
-- [ ] All three locations work: Dynamic, Mouse pointer, Ice icon — no crash.
+- [ ] All three locations work: Dynamic, Mouse pointer, IceMelt icon — no crash.
 - [ ] On an external display: pill background matches that display's menu bar color.
 
 ## Search
@@ -42,7 +42,7 @@ regression gate. Check items off in the PR or release notes.
 
 ## Multi-display / spaces (if hardware available)
 - [ ] Hide/show works on a second display's menu bar.
-- [ ] Fullscreen app: Ice idles gracefully, resumes on exit.
+- [ ] Fullscreen app: IceMelt idles gracefully, resumes on exit.
 - [ ] Display hot-plug: no crash, layout recovers.
 
 ## Known-broken (do not block release)

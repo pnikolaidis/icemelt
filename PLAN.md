@@ -24,8 +24,8 @@ distributed outside the Mac App Store (the app cannot be sandboxed).
    that machinery). Optionally: ask scottaw66 for an MIT/GPL grant, which would let us
    port modules directly.
 4. **Fork identity.** Rename app to IceMelt, new bundle ID (`com.pnikolaidis.icemelt`),
-   and **remove or repoint the Sparkle update feed** (`SUFeedURL` currently points at
-   jordanbaird's appcast — shipping with it would auto-"update" our users back to
+   and **remove or repoint the Sparkle update feed** (`SUFeedURL` originally pointed at
+   jordanbaird's appcast — shipping with it would have auto-"updated" our users back to
    upstream Ice). GPL-3.0 retained; keep upstream attribution and license headers.
 5. **Updates: keep Sparkle (fleet decision, 2026-07).** Scratch Itch's closed-source
    apps standardize on a custom appcast self-updater (cmdtab's `UpdateChecker.swift`
@@ -41,9 +41,11 @@ distributed outside the Mac App Store (the app cannot be sandboxed).
       doc/template commits.
 - [x] Rename product to IceMelt; new bundle IDs for app (`com.pnikolaidis.icemelt`) +
       `MenuBarItemService` XPC (service name constant updated in `Shared/Services/`).
-      Target/scheme/folder names still say "Ice" — cosmetic, rename later if desired.
+      Target/scheme/folder names still say "Ice" — tracked as issue #3.
 - [x] Neutralize Sparkle: `SUFeedURL`/`SUPublicEDKey` removed, automatic checks
       disabled until we host our own appcast (GitHub Releases + generated appcast later).
+      *(Superseded 2026-07-18: both keys are now set to IceMelt's own feed and EdDSA
+      public key — see guiding decision 5.)*
 - [x] CI: GitHub Actions `ci.yml` — SwiftLint (container) + Release build on `macos-26`
       runner; replaces upstream's stale `lint.yml`.
 - [x] Deployment target raised to 26.0. Required bridging
@@ -57,27 +59,27 @@ distributed outside the Mac App Store (the app cannot be sandboxed).
 Community demand is unambiguous: the two top-voted issues (74 and 56 👍) are "stable
 version for Tahoe?"; most top bugs are Tahoe symptoms.
 
-- [ ] **Host-app resolution under Control Center ownership** — the branch's central
+- [x] **Host-app resolution under Control Center ownership** — the branch's central
       unsolved problem (commit `ad86802`: "hopefully a temporary measure"). Rework
       `MenuBarItemService/SourcePIDCache` using the MikanBar-proven approach: walk each
       running app's `AXExtrasMenuBar` via Accessibility, resolve AX element → window ID
       via `_AXUIElementGetWindow`, and correlate with the CGS window list, instead of
       trusting window ownership (Control Center owns everything on 26).
       → fixes: items misidentified, "unable to display menu bar items" (#679, #711).
-- [ ] **Fix empty Menu Bar Layout / image cache** (#744, #951, #891, #846 — ~150 👍
+- [x] **Fix empty Menu Bar Layout / image cache** (#744, #951, #891, #846 — ~150 👍
       combined). Two-pronged:
       1. Repair `MenuBarItemImageCache` capture on Tahoe (branch already reverted the
          deprecated-API shim that broke capture for some users).
       2. Add a **no-Screen-Recording fallback**: derive item identity/labels/icons from
          `NSRunningApplication` (MikanBar technique). Layout and search UIs degrade to
          app icons + names instead of a blank pane when capture is unavailable.
-- [ ] **Fix Ice Bar on Tahoe** (#665 invisible, #786 crash).
-- [ ] **Crash on menu bar click** (#947) and the unresponsive Sparkle dialog (#681,
+- [x] **Fix the IceMelt Bar on Tahoe** (#665 invisible, #786 crash).
+- [x] **Crash on menu bar click** (#947) and the unresponsive Sparkle dialog (#681,
       #937) — the latter likely disappears with the Sparkle feed rework.
 - [ ] Triage upstream's macOS 27 beta reports (#965, #954) — build against Xcode 26.x
       SDK, keep 27 breakage on a watchlist; do not block the Tahoe release on it.
 - verify: manual smoke suite on a Tahoe machine (hide/show, layout pane populated,
-  Ice Bar, search, appearance styling) + regression checklist written down in
+  the IceMelt Bar, search, appearance styling) + regression checklist written down in
   `docs/VERIFY.md`.
 - **Milestone: tag v0.12.0-melt.1, publish a notarized release.** This alone leapfrogs
   upstream for most users.
@@ -134,7 +136,7 @@ Ordered by upstream 👍, effort-weighted:
 - [ ] **Conditional visibility triggers** (#62, 68 👍) — show hidden section when
       conditions are met (e.g., app active, battery state). Start minimal: per-app
       triggers.
-- [ ] **Per-display behavior** (#223, 68 👍 / #188 / #303) — Ice Bar or hiding only on
+- [ ] **Per-display behavior** (#223, 68 👍 / #188 / #303) — IceMelt Bar or hiding only on
       the built-in/notched display.
 - [ ] **Settings export/import** (#326, 27 👍) — settings are already Codable-heavy;
       add JSON export. Cheap win, do early if convenient.
