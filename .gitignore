@@ -1,3 +1,6 @@
 .DS_Store
 build/
 xcuserdata/
+dist/
+claude.md
+*.zip
