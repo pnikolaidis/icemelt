@@ -7,7 +7,7 @@ import CoreGraphics
 import Foundation
 
 enum MenuBarItemService {
-    static let name = "com.pnikolaidis.iceMeltmelt.MenuBarItemService"
+    static let name = "com.pnikolaidis.icemelt.MenuBarItemService"
 }
 
 extension MenuBarItemService {

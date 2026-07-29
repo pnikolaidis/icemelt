@@ -16,7 +16,7 @@ struct AboutSettingsPane: View {
     }
 
     private var contributeURL: URL {
-        URL(string: "https://github.com/pnikolaidis/iceMeltmelt")!
+        URL(string: "https://github.com/pnikolaidis/icemelt")!
     }
 
     private var issuesURL: URL {
@@ -91,7 +91,7 @@ struct AboutSettingsPane: View {
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary.opacity(0.67))
 
-                    Link("scratchitchsoftware.com/iceMeltmelt", destination: URL(string: "https://scratchitchsoftware.com/iceMeltmelt")!)
+                    Link("scratchitchsoftware.com/icemelt", destination: URL(string: "https://scratchitchsoftware.com/icemelt")!)
                         .font(.system(size: 14))
                 }
                 .fontWeight(.medium)
