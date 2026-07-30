@@ -3,6 +3,14 @@
     <channel>
         <title>IceMelt</title>
         <item>
+            <title>0.12.0-melt.3</title>
+            <pubDate>Thu, 30 Jul 2026 16:01:26 -0400</pubDate>
+            <sparkle:version>1124</sparkle:version>
+            <sparkle:shortVersionString>0.12.0-melt.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/pnikolaidis/icemelt/releases/download/v0.12.0-melt.3/IceMelt-0.12.0-melt.3.dmg" length="4922256" type="application/octet-stream" sparkle:edSignature="ZiW+9ivcTPBQtKsHkP7/JpDOyirvEmGFOwSw8AQNvgghYbiVcem5IZpGazxDhGuk0yh6pTbxlEPed/tqt1jZDw=="/>
+        </item>
+        <item>
             <title>0.12.0-melt.2</title>
             <pubDate>Sat, 18 Jul 2026 22:17:22 -0400</pubDate>
             <sparkle:version>1123</sparkle:version>
