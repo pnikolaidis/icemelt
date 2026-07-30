@@ -52,6 +52,7 @@ final class HIDEventManager: ObservableObject {
         case .leftMouseDown:
             handleShowOnClick(appState: appState, screen: screen)
             handleSmartRehide(with: event, appState: appState, screen: screen)
+            handleIceMeltBarDismissal(with: event, appState: appState, screen: screen)
         case .rightMouseDown:
             handleSecondaryContextMenu(appState: appState, screen: screen)
         default:
@@ -278,6 +279,48 @@ extension HIDEventManager {
             for section in appState.menuBarManager.sections {
                 section.hide()
             }
+        }
+    }
+
+    // MARK: Handle IceMelt Bar Dismissal
+
+    /// Dismisses the IceMelt Bar when a menu bar item belonging to another app is clicked.
+    ///
+    /// Smart rehide can't cover this: it returns as soon as the mouse is inside the menu
+    /// bar, so clicking a visible menu bar item left the bar on screen indefinitely.
+    /// Clicks in empty menu bar space are already handled by ``handleShowOnClick``, and
+    /// clicks on an item inside the bar are handled by the bar's own item actions.
+    private func handleIceMeltBarDismissal(with event: NSEvent, appState: AppState, screen: NSScreen) {
+        // Only act while the bar is actually on screen. This also keeps the handler
+        // inert while the bar's own item actions run, since those close the bar before
+        // forwarding the click to the real menu bar item.
+        guard appState.menuBarManager.iceMeltBarPanel.currentSection != nil else {
+            return
+        }
+
+        // A click inside the bar is the bar's own business.
+        guard event.window !== appState.menuBarManager.iceMeltBarPanel else {
+            return
+        }
+
+        // Clicking one of IceMelt's own control items already toggles the section.
+        for name in MenuBarSection.Name.allCases {
+            guard let controlItem = appState.menuBarManager.controlItem(withName: name) else {
+                continue
+            }
+            if event.window === controlItem.window {
+                return
+            }
+        }
+
+        // Only dismiss for clicks on a menu bar item. Empty menu bar space is
+        // `handleShowOnClick`'s job, and clicks outside the menu bar are smart rehide's.
+        guard isMouseInsideMenuBarItem(appState: appState, screen: screen) else {
+            return
+        }
+
+        for section in appState.menuBarManager.sections {
+            section.hide()
         }
     }
 
