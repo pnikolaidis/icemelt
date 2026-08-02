@@ -147,7 +147,7 @@ Bug reports and feature requests belong in [IceMelt's issue tracker](https://git
 
 Before reporting a bug, check [FREQUENT_ISSUES.md](FREQUENT_ISSUES.md). Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-Development happens on the `melt` branch; `main` mirrors upstream. CI runs SwiftLint and a Release build on every push and pull request.
+Development happens on the `melt` branch (the default); `main` is kept in sync with it. Upstream Ice remains available as a git remote for cherry-picking. CI runs SwiftLint and a Release build on every push and pull request.
 
 ## License
 
