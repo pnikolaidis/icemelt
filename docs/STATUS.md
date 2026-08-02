@@ -40,8 +40,9 @@ Snapshot for resuming work. Last updated 2026-07-30.
   history with BFG** (issue #19, closed) — note the repo is **public**, so this mattered.
   Residual: the old commits remain fetchable by SHA via GitHub's `refs/pull/*` and cache
   until a GitHub Support request removes them.
-- **App icon**: replaced with the designer's droplet artwork (PR #11). Light variant only;
-  the dark iconset is unused (issue #17).
+- **App icon**: replaced with the designer's droplet artwork (PR #11). Dark variant wired
+  via an Icon Composer `AppIcon.icon` package (issue #17) — the mac appiconset format has
+  no dark slots, so the asset-catalog route suggested in the issue does not work on macOS.
 - **Unreleased**: `melt` is several merged PRs ahead of the last shipped DMG and
   `MARKETING_VERSION` is still `0.12.0-melt.2` (issue #18).
 
