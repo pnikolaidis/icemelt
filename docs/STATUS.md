@@ -36,8 +36,10 @@ Snapshot for resuming work. Last updated 2026-07-30.
 - **Untracked in the working tree** (deliberately not committed, and now in `.gitignore`):
   `IceMelt app icon design.zip` (designer package), `dist/` (build output), `claude.md`
   (workflow rules — same file as `CLAUDE.md` on this case-insensitive filesystem).
-  These were committed by mistake in `d86be07` and untracked again in `c23d852`; the blobs
-  are still in history (issue #19).
+  These were committed by mistake, untracked again, and on 2026-08-02 **purged from git
+  history with BFG** (issue #19, closed) — note the repo is **public**, so this mattered.
+  Residual: the old commits remain fetchable by SHA via GitHub's `refs/pull/*` and cache
+  until a GitHub Support request removes them.
 - **App icon**: replaced with the designer's droplet artwork (PR #11). Light variant only;
   the dark iconset is unused (issue #17).
 - **Unreleased**: `melt` is several merged PRs ahead of the last shipped DMG and
@@ -88,7 +90,8 @@ Issue #18 is blocked on these.
 3. Decisions when convenient:
    - Ask the designer for a filled/hollow droplet pair for hidden/visible menu bar states?
    - Should the icon design sources live in the repo?
-   - Purge git history (#19), or leave it since the repo is private?
+   - ~~Purge git history (#19)~~ — done 2026-08-02; optionally file a GitHub Support
+     request to drop the cached pre-purge commits (see issue #19 for details).
 
 ## How to resume
 
