@@ -33,7 +33,7 @@ This is not a bug, but a missing feature. It is tracked as the canonical-order w
 4. Update your `Menu Bar Items` in `IceMelt`
 5. Return `Automatically hide and show the menu bar` to your preferred settings
 
-![Disable Menu Bar Hiding](https://github.com/user-attachments/assets/74c1fde6-d310-4fe3-9f2b-703d8ccb636a)
+![Disable Menu Bar Hiding](docs/images/system-settings-menu-bar-hiding.png)
 
 ## The Menu Bar Layout pane shows app icons instead of the real items
 
