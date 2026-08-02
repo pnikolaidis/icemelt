@@ -4,3 +4,6 @@ xcuserdata/
 dist/
 claude.md
 *.zip
+
+# Claude Code agent worktrees
+.claude/
