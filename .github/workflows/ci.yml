@@ -8,7 +8,10 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    container: ghcr.io/realm/swiftlint:latest
+    # Pinned (issue #16): a floating :latest once turned CI red on a docs-only
+    # merge when a new rule landed upstream. Bump deliberately, matching the
+    # version developers run locally.
+    container: ghcr.io/realm/swiftlint:0.65.0
     steps:
       - uses: actions/checkout@v4
       - name: Run SwiftLint
