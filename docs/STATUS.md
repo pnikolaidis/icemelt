@@ -98,7 +98,7 @@ look is wrong.
 3. **Pre-promotion items** (2026-08-02):
    - Add the IceMelt page (or a redirect) at `scratchitchsoftware.com/icemelt` — the
      shipped About pane and README link there; it currently 404s.
-   - Review and send the heads-up email to Jordan Baird sitting in Gmail drafts.
+   - ~~Review and send the heads-up email to Jordan Baird~~ — sent 2026-08-02.
    - Create the `pnikolaidis/homebrew-tap` repo and push the staged cask.
    - Optionally file the GitHub Support request (draft provided) to drop cached
      pre-purge commits.
