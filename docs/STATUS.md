@@ -51,10 +51,11 @@ Snapshot for resuming work. Last updated 2026-08-02.
   Scratch Itch Software's work built on Ice by Jordan Baird. **Known gap**: the
   `scratchitchsoftware.com/icemelt` URL shipped in the About pane and README is a 404
   until Peter adds the page or a redirect (site products live under `/apps/<name>/`).
-- **Promotion prep (2026-08-02)**: repo homepage + topics set; heads-up email to Jordan
-  Baird drafted in Peter's Gmail (unsent); Homebrew cask staged and `brew style`-validated
-  in the session scratchpad awaiting Peter creating the `pnikolaidis/homebrew-tap` repo;
-  GitHub Support request for the cached pre-purge commits drafted and handed to Peter.
+- **Promotion prep**: plan, ground rules, and pre-flight checklist live in
+  [`docs/PROMOTION.md`](PROMOTION.md). Heads-up email to Jordan Baird sent 2026-08-02.
+  Homebrew cask staged in `packaging/homebrew-tap/` (see `PUBLISHING.md` there); the
+  GitHub Support request text is a comment on issue #19; the human verification
+  checklist is `docs/verify-runs/pending-human-checklist.md`.
 
 ## Outstanding
 
