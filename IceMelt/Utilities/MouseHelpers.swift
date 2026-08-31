@@ -4,6 +4,7 @@
 //
 
 import CoreGraphics
+import Foundation
 import OSLog
 
 /// A namespace for mouse helper operations.
@@ -23,19 +24,35 @@ enum MouseHelpers {
     }
 
     /// Hides the mouse cursor and increments the hide cursor count.
+    ///
+    /// The hide cursor count is tracked per window server connection,
+    /// and connections are created per thread. Both this function and
+    /// ``showCursor()`` dispatch to the main thread so that every
+    /// hide/show pair lands on the same connection — a pair split
+    /// across cooperative pool threads leaks a hide count that takes
+    /// effect the next time the app is activated. The main thread's
+    /// connection is also the one that carries the
+    /// `SetsCursorInBackground` property set at launch.
     static func hideCursor() {
-        let result = CGDisplayHideCursor(CGMainDisplayID())
-        if result != .success {
-            Logger.default.error("CGDisplayHideCursor failed with error \(result.logString, privacy: .public)")
+        DispatchQueue.main.async {
+            let result = CGDisplayHideCursor(CGMainDisplayID())
+            if result != .success {
+                Logger.default.error("CGDisplayHideCursor failed with error \(result.logString, privacy: .public)")
+            }
         }
     }
 
     /// Decrements the hide cursor count and shows the mouse cursor
     /// if the count is `0`.
+    ///
+    /// Dispatched to the main thread for the reasons described in
+    /// ``hideCursor()``.
     static func showCursor() {
-        let result = CGDisplayShowCursor(CGMainDisplayID())
-        if result != .success {
-            Logger.default.error("CGDisplayShowCursor failed with error \(result.logString, privacy: .public)")
+        DispatchQueue.main.async {
+            let result = CGDisplayShowCursor(CGMainDisplayID())
+            if result != .success {
+                Logger.default.error("CGDisplayShowCursor failed with error \(result.logString, privacy: .public)")
+            }
         }
     }
 
