@@ -18,7 +18,10 @@ Snapshot for resuming work. Last updated 2026-08-02.
 - **Branches**: `melt` is the **default branch** and where all work lands. `main` is now
   fast-forwarded to match `melt` — it is **no longer an upstream mirror**. Upstream is
   still available as the `upstream` remote for cherry-picking.
-- **Local install**: the latest signed build always goes to `~/Applications/IceMelt.app`.
+- **Local install**: the latest signed build goes to `/Applications/IceMelt.app`
+  (Peter, 2026-09-04 — reverses the earlier `~/Applications` rule; see
+  `docs/INSTALL-LOCATION.md`). `~/Applications` remains a silent fallback, and
+  a copy already installed there is left alone rather than moved.
 - **CI**: `.github/workflows/ci.yml` — SwiftLint + Release build on the `macos-26`
   runner; green as of the last push.
 - **Plan of record**: `PLAN.md` (phases), `docs/VERIFY.md` (manual regression checklist).
