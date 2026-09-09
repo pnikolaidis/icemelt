@@ -109,7 +109,11 @@ final class MenuBarItemImageCache: ObservableObject {
 
     /// Captures a composite image of the given items, then crops out an image
     /// for each item and returns the result.
-    private nonisolated func compositeCapture(_ items: [MenuBarItem], scale: CGFloat) -> CaptureResult {
+    ///
+    /// The scale is derived from the capture itself rather than taken from a
+    /// screen, since ``captureOption`` includes `.bestResolution` and returns
+    /// the image at the capturing display's pixel density.
+    private nonisolated func compositeCapture(_ items: [MenuBarItem]) -> CaptureResult {
         var result = CaptureResult()
 
         var windowIDs = [CGWindowID]()
@@ -132,9 +136,20 @@ final class MenuBarItemImageCache: ObservableObject {
 
         guard
             let compositeImage = ScreenCapture.captureWindows(with: windowIDs, option: captureOption),
-            CGFloat(compositeImage.width) == boundsUnion.width * scale, // Safety check.
+            boundsUnion.width >= 1,
+            boundsUnion.height >= 1,
             !compositeImage.isTransparent()
         else {
+            result.excluded = items // Exclude all items.
+            return result
+        }
+
+        let scale = CGFloat(compositeImage.width) / boundsUnion.width
+
+        // Safety check. A capture that corresponds to `boundsUnion` is scaled
+        // by the same factor in both dimensions; the tolerance absorbs the
+        // rounding of the image's integral pixel dimensions.
+        guard abs(scale - CGFloat(compositeImage.height) / boundsUnion.height) < 0.05 else {
             result.excluded = items // Exclude all items.
             return result
         }
@@ -168,6 +183,12 @@ final class MenuBarItemImageCache: ObservableObject {
 
     /// Captures an image of each of the given items individually, then
     /// returns the result.
+    ///
+    /// - Parameters:
+    ///   - items: The items to capture.
+    ///   - scale: The scale to apply to an item whose current bounds can't be
+    ///     read. Where they can, the scale is derived from the capture, for
+    ///     the reason given in ``compositeCapture(_:)``.
     private nonisolated func individualCapture(_ items: [MenuBarItem], scale: CGFloat) -> CaptureResult {
         var result = CaptureResult()
 
@@ -179,7 +200,17 @@ final class MenuBarItemImageCache: ObservableObject {
                 result.excluded.append(item)
                 continue
             }
-            result.images[item.tag] = CapturedImage(cgImage: image, scale: scale)
+
+            let capturedScale: CGFloat = if
+                let bounds = Bridging.getWindowBounds(for: item.windowID),
+                bounds.width >= 1
+            {
+                CGFloat(image.width) / bounds.width
+            } else {
+                scale
+            }
+
+            result.images[item.tag] = CapturedImage(cgImage: image, scale: capturedScale)
         }
 
         return result
@@ -194,7 +225,7 @@ final class MenuBarItemImageCache: ObservableObject {
             return individualCapture(items, scale: scale)
         }
 
-        let compositeResult = compositeCapture(items, scale: scale)
+        let compositeResult = compositeCapture(items)
 
         if compositeResult.excluded.isEmpty {
             return compositeResult // All items captured successfully.
