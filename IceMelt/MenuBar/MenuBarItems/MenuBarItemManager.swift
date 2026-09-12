@@ -469,21 +469,41 @@ extension MenuBarItemManager {
         !MouseHelpers.isButtonPressed()
     }
 
-    /// Waits asynchronously for the user to pause input.
+    /// The longest ``waitForUserToPauseInput()`` waits before giving up
+    /// and letting the operation proceed anyway.
+    ///
+    /// The wait is a courtesy — it keeps IceMelt from fighting input the
+    /// user is in the middle of — so failing to observe a pause must not
+    /// block the operation forever. It used to: a latched modifier or
+    /// mouse button in the session-wide event state holds the predicate
+    /// false indefinitely, stranding the caller and, because callers hide
+    /// the cursor first, the cursor with it (issue #35).
+    private static let inputPauseTimeout = Duration.seconds(2)
+
+    /// Waits asynchronously for the user to pause input, for at most
+    /// ``inputPauseTimeout``.
     private nonisolated func waitForUserToPauseInput() async throws {
+        let start = ContinuousClock.now
         let waitTask = Task {
             while true {
                 try Task.checkCancellation()
                 if hasUserPausedInput(for: .milliseconds(50)) {
-                    break
+                    return true
+                }
+                if start.duration(to: .now) >= Self.inputPauseTimeout {
+                    return false
                 }
                 try await Task.sleep(for: .milliseconds(250))
             }
         }
+        let didPause: Bool
         do {
-            try await waitTask.value
+            didPause = try await waitTask.value
         } catch {
             throw EventError.cannotComplete
+        }
+        if !didPause {
+            logger.warning("User input did not pause within \(Self.inputPauseTimeout, privacy: .public), proceeding anyway")
         }
     }
 
@@ -1293,6 +1313,11 @@ extension MenuBarItemManager {
         /// The number of attempts that have been made to rehide the item.
         var rehideAttempts = 0
 
+        /// When the item was temporarily shown.
+        ///
+        /// Used to cap how long a shown interface may defer the rehide.
+        let shownAt = ContinuousClock.now
+
         /// A Boolean value that indicates whether the menu bar item's
         /// interface is showing.
         var isShowingInterface: Bool {
@@ -1335,6 +1360,14 @@ extension MenuBarItemManager {
         }
         return nil
     }
+
+    /// The longest a shown interface may defer rehiding a temporarily
+    /// shown item before it is rehidden regardless.
+    ///
+    /// Long enough that a menu the user is genuinely reading is never
+    /// yanked away, short enough that an interface which never reports
+    /// itself closed cannot strand the item indefinitely.
+    private static let maxInterfaceDeferral = Duration.seconds(60)
 
     /// Schedules a timer for the given interval that rehides the
     /// temporarily shown items when fired.
@@ -1468,10 +1501,23 @@ extension MenuBarItemManager {
         guard !temporarilyShownItemContexts.isEmpty else {
             return
         }
-        guard !temporarilyShownItemContexts.contains(where: { $0.isShowingInterface }) else {
-            logger.debug("Menu bar item interface is shown, so waiting to rehide")
-            runRehideTimer(for: 3)
-            return
+        let blockingContexts = temporarilyShownItemContexts.filter { $0.isShowingInterface }
+        if !blockingContexts.isEmpty {
+            // An interface that never reports itself closed — one that opened
+            // off-screen, say — used to defer the rehide every 3 seconds
+            // forever, stranding the item in the visible menu bar (issue #35).
+            let blockedFor = blockingContexts.map(\.shownAt).min()?.duration(to: .now) ?? .zero
+            guard blockedFor >= Self.maxInterfaceDeferral else {
+                logger.debug("Menu bar item interface is shown, so waiting to rehide")
+                runRehideTimer(for: 3)
+                return
+            }
+            logger.warning(
+                """
+                Menu bar item interface has deferred the rehide for \
+                \(blockedFor, privacy: .public), rehiding anyway
+                """
+            )
         }
         guard hasUserPausedInput(for: .milliseconds(250)) else {
             logger.debug("Found recent user input, so waiting to rehide")

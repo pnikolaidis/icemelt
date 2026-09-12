@@ -23,6 +23,21 @@ enum MouseHelpers {
         CGEvent(source: nil)?.location
     }
 
+    /// The number of hides currently in effect that have not yet been
+    /// balanced by a show. Only ever touched on the main thread.
+    private static var hideCount = 0
+
+    /// Timer that releases the cursor if a hide is never balanced.
+    private static var cursorWatchdog: Timer?
+
+    /// How long the cursor may stay hidden before the watchdog forces
+    /// it back.
+    ///
+    /// Comfortably longer than any legitimate item operation — a move
+    /// retries up to 8 times — and far shorter than "until the user
+    /// restarts IceMelt", which is what an unbalanced hide used to mean.
+    private static let cursorWatchdogTimeout: TimeInterval = 10
+
     /// Hides the mouse cursor and increments the hide cursor count.
     ///
     /// The hide cursor count is tracked per window server connection,
@@ -33,12 +48,20 @@ enum MouseHelpers {
     /// effect the next time the app is activated. The main thread's
     /// connection is also the one that carries the
     /// `SetsCursorInBackground` property set at launch.
+    ///
+    /// Balance is not enough on its own: every caller pairs its hide
+    /// with a `defer` that runs on return, so a caller that blocks
+    /// indefinitely leaves the cursor hidden for as long as it blocks.
+    /// The watchdog started here bounds that (issue #35).
     static func hideCursor() {
         DispatchQueue.main.async {
             let result = CGDisplayHideCursor(CGMainDisplayID())
-            if result != .success {
+            guard result == .success else {
                 Logger.default.error("CGDisplayHideCursor failed with error \(result.logString, privacy: .public)")
+                return
             }
+            hideCount += 1
+            restartCursorWatchdog()
         }
     }
 
@@ -53,6 +76,44 @@ enum MouseHelpers {
             if result != .success {
                 Logger.default.error("CGDisplayShowCursor failed with error \(result.logString, privacy: .public)")
             }
+            hideCount = max(0, hideCount - 1)
+            if hideCount == 0 {
+                cursorWatchdog?.invalidate()
+                cursorWatchdog = nil
+            } else {
+                restartCursorWatchdog()
+            }
+        }
+    }
+
+    /// Restarts the watchdog that forces the cursor back if the
+    /// outstanding hides are never balanced.
+    ///
+    /// Must be called on the main thread.
+    private static func restartCursorWatchdog() {
+        cursorWatchdog?.invalidate()
+        cursorWatchdog = Timer.scheduledTimer(withTimeInterval: cursorWatchdogTimeout, repeats: false) { _ in
+            guard hideCount > 0 else {
+                cursorWatchdog = nil
+                return
+            }
+            Logger.default.error(
+                """
+                Cursor still hidden after \(cursorWatchdogTimeout, format: .fixed(precision: 0), privacy: .public)s \
+                with \(hideCount, privacy: .public) unbalanced hide(s); forcing it back
+                """
+            )
+            // Drain the count rather than showing once: the count is
+            // per connection, and only reaching 0 makes the cursor visible.
+            while hideCount > 0 {
+                let result = CGDisplayShowCursor(CGMainDisplayID())
+                if result != .success {
+                    Logger.default.error("CGDisplayShowCursor failed with error \(result.logString, privacy: .public)")
+                    break
+                }
+                hideCount -= 1
+            }
+            cursorWatchdog = nil
         }
     }
 
