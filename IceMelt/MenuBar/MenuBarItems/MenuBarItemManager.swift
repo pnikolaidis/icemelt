@@ -283,6 +283,43 @@ extension MenuBarItemManager {
         }
     }
 
+    /// Returns the given items with tag collisions removed, keeping the
+    /// most recently created window of each colliding set.
+    ///
+    /// ``MenuBarItemTag`` is a namespace and a title, with no window
+    /// identity, so a stale or duplicated window yields a second item the
+    /// cache cannot tell apart from the first. Left in, it is drawn twice
+    /// in the IceMelt Bar — the bar makes a view per window, while images
+    /// are keyed by tag — and every tag lookup can resolve to the wrong
+    /// one. The highest window ID is the newest window, which is the one
+    /// the owning app is using (issue #38).
+    private func removingTagCollisions(_ items: [MenuBarItem]) -> [MenuBarItem] {
+        var keptIndexForTag = [MenuBarItemTag: Int]()
+        var kept = [MenuBarItem]()
+
+        for item in items {
+            guard let index = keptIndexForTag[item.tag] else {
+                keptIndexForTag[item.tag] = kept.count
+                kept.append(item)
+                continue
+            }
+            let existing = kept[index]
+            let isNewer = item.windowID > existing.windowID
+            logger.warning(
+                """
+                Duplicate tag \(item.tag, privacy: .public): keeping window \
+                \(isNewer ? item.windowID : existing.windowID, privacy: .public), \
+                dropping \(isNewer ? existing.windowID : item.windowID, privacy: .public)
+                """
+            )
+            if isNewer {
+                kept[index] = item
+            }
+        }
+
+        return kept
+    }
+
     /// Caches the given menu bar items, without ensuring that the provided
     /// control items are correctly ordered.
     private func uncheckedCacheItems(
@@ -292,7 +329,7 @@ extension MenuBarItemManager {
     ) async {
         var context = CacheContext(controlItems: controlItems, displayID: displayID)
 
-        for item in items where context.isValidForCaching(item) {
+        for item in removingTagCollisions(items) where context.isValidForCaching(item) {
             if item.sourcePID == nil {
                 logger.warning("Missing sourcePID for \(item.logString, privacy: .public)")
                 context.shouldClearCachedItemWindowIDs = true
@@ -1304,6 +1341,13 @@ extension MenuBarItemManager {
         /// The tag associated with the item.
         let tag: MenuBarItemTag
 
+        /// The identifier of the window that was actually shown.
+        ///
+        /// Tags are not unique — a stale or duplicated window produces a
+        /// second item with an identical tag — so the window is what
+        /// identifies the item to return (issue #38).
+        let windowID: CGWindowID
+
         /// The destination to return the item to.
         let returnDestination: MoveDestination
 
@@ -1340,8 +1384,9 @@ extension MenuBarItemManager {
             return current.isOnScreen
         }
 
-        init(tag: MenuBarItemTag, returnDestination: MoveDestination) {
+        init(tag: MenuBarItemTag, windowID: CGWindowID, returnDestination: MoveDestination) {
             self.tag = tag
+            self.windowID = windowID
             self.returnDestination = returnDestination
         }
     }
@@ -1349,7 +1394,9 @@ extension MenuBarItemManager {
     /// Gets the destination to return the given item to after it is
     /// temporarily shown.
     private func getReturnDestination(for item: MenuBarItem, in items: [MenuBarItem]) -> MoveDestination? {
-        guard let index = items.firstIndex(matching: item.tag) else {
+        // Match the window, not the tag: a duplicate window with the same tag
+        // would otherwise yield the neighbors of the wrong item (issue #38).
+        guard let index = items.firstIndex(where: { $0.windowID == item.windowID }) else {
             return nil
         }
         if items.indices.contains(index + 1) {
@@ -1463,7 +1510,11 @@ extension MenuBarItemManager {
             return
         }
 
-        let context = TemporarilyShownItemContext(tag: item.tag, returnDestination: destination)
+        let context = TemporarilyShownItemContext(
+            tag: item.tag,
+            windowID: item.windowID,
+            returnDestination: destination
+        )
         temporarilyShownItemContexts.append(context)
 
         rehideTimer?.invalidate()
@@ -1546,7 +1597,19 @@ extension MenuBarItemManager {
         }
 
         while let context = currentContexts.popLast() {
-            guard let item = items.first(matching: context.tag) else {
+            // Resolve the window that was actually shown. Falling back to the
+            // tag only matters when that window is gone, e.g. the owning app
+            // recreated its status item while the item was shown.
+            let shownItem = items.first { $0.windowID == context.windowID }
+            if shownItem == nil, items.first(matching: context.tag) != nil {
+                logger.warning(
+                    """
+                    Window \(context.windowID, privacy: .public) for \
+                    \(context.tag, privacy: .public) is gone, falling back to its tag
+                    """
+                )
+            }
+            guard let item = shownItem ?? items.first(matching: context.tag) else {
                 continue
             }
             do {
