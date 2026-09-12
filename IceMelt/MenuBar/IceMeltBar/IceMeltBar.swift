@@ -366,7 +366,8 @@ private struct IceMeltBarContentView: View {
                             itemManager: itemManager,
                             menuBarManager: menuBarManager,
                             item: item,
-                            section: section
+                            section: section,
+                            menuBarHeight: screen.getMenuBarHeight()
                         )
                     }
                 }
@@ -390,6 +391,9 @@ private struct IceMeltBarItemView: View {
 
     let item: MenuBarItem
     let section: MenuBarSection.Name
+
+    /// The height of the menu bar on the screen the bar is presented on.
+    let menuBarHeight: CGFloat?
 
     private var leftClickAction: () -> Void {
         return { [weak itemManager, weak menuBarManager] in
@@ -432,9 +436,35 @@ private struct IceMeltBarItemView: View {
         return cachedImage.nsImage
     }
 
+    /// The size to draw the given image at.
+    ///
+    /// Item images are captured at the menu bar height of the display the
+    /// items live on, which is not necessarily the height of the menu bar
+    /// the bar is presented over — a notched built-in display and an
+    /// external display differ by several points. Fitting the image to the
+    /// presenting menu bar keeps items sized correctly across displays.
+    /// With a single display the two heights are equal, and the image is
+    /// drawn at its natural size.
+    private func size(for image: NSImage) -> CGSize {
+        guard
+            let menuBarHeight,
+            menuBarHeight >= 1,
+            image.size.height >= 1
+        else {
+            return image.size
+        }
+        return CGSize(
+            width: image.size.width * (menuBarHeight / image.size.height),
+            height: menuBarHeight
+        )
+    }
+
     var body: some View {
         if let image {
+            let size = size(for: image)
             Image(nsImage: image)
+                .resizable()
+                .frame(width: size.width, height: size.height)
                 .contentShape(Rectangle())
                 .overlay {
                     IceMeltBarItemClickView(

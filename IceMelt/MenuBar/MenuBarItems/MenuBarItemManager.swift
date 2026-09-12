@@ -357,9 +357,14 @@ extension MenuBarItemManager {
             await cacheActor.updateCachedItemWindowIDs(itemWindowIDs)
 
             guard let controlItems = ControlItemPair(items: &items) else {
-                // ???: Is clearing the cache the best thing to do here?
-                logger.warning("Missing control item for hidden section, clearing menu bar item cache")
-                itemCache = ItemCache(displayID: nil)
+                // The hidden control item can be missing transiently, e.g. while
+                // the active menu bar display's item list settles after a space
+                // or display change. Emptying the cache drops the IceMelt Bar
+                // back to "Loading menu bar items…" for as long as it takes the
+                // list to change again, so keep the previous cache and clear the
+                // cached windowIDs so the next pass isn't skipped.
+                logger.warning("Missing control item for hidden section, keeping previous menu bar item cache")
+                await cacheActor.clearCachedItemWindowIDs()
                 return
             }
 
