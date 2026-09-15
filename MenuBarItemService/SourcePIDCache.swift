@@ -107,8 +107,19 @@ final class SourcePIDCache {
 
     /// State for the cache.
     private struct State {
+        /// How often geometric attributions are rechecked against live
+        /// geometry.
+        static let revalidationInterval = Duration.seconds(2)
+
         var apps = [CachedApplication]()
         var pids = [CGWindowID: pid_t]()
+
+        /// Windows whose PID came from the exact backing-window lookup
+        /// rather than from geometry. These are never revalidated.
+        var exactWindowIDs = Set<CGWindowID>()
+
+        /// When cached geometric attributions were last rechecked.
+        var lastRevalidation: ContinuousClock.Instant?
 
         /// Reorders the cached apps so that those that are confirmed
         /// to have an extras menu bar are first in the array.
@@ -150,6 +161,46 @@ final class SourcePIDCache {
             return items
         }
 
+        /// Drops cached geometric attributions that live geometry no longer
+        /// supports, so that they are resolved again.
+        ///
+        /// Geometric matching pairs window bounds from the window server with
+        /// accessibility frames read from each app, and the two need not
+        /// describe the same moment — during a move, or while the layout
+        /// settles at launch, they disagree. A match made then attributes a
+        /// window to its neighbour, and because attributions used to be cached
+        /// for good, the wrong owner stuck until the app quit (issue #44).
+        ///
+        /// An entry is dropped only when there is positive evidence against
+        /// it and none for it. No item of the cached app lies within the
+        /// window's current span, and either that app has readable items
+        /// elsewhere or another app's item lies within the span. Exact
+        /// attributions are trusted, and an entry with no evidence either
+        /// way — its app unreadable and nothing else on the window — is left
+        /// alone rather than dropped for missing data.
+        private mutating func invalidateStalePIDs(for windows: [WindowInfo], items: [ExtrasMenuBarItem]) {
+            let readablePIDs = Set(items.map(\.pid))
+            for window in windows {
+                guard
+                    let pid = pids[window.windowID],
+                    !exactWindowIDs.contains(window.windowID),
+                    let bounds = window.currentBounds()
+                else {
+                    continue
+                }
+                let itemsInSpan = items.filter { item in
+                    bounds.minX <= item.frame.midX && item.frame.midX <= bounds.maxX
+                }
+                guard !itemsInSpan.contains(where: { $0.pid == pid }) else {
+                    continue // Supported by live geometry.
+                }
+                if readablePIDs.contains(pid) || !itemsInSpan.isEmpty {
+                    Logger.default.warning("Dropping stale source PID \(pid) for window \(window.windowID)")
+                    pids[window.windowID] = nil
+                }
+            }
+        }
+
         /// Updates the cached process identifiers for the given windows.
         ///
         /// Attribution works in two phases. First, each accessibility item is
@@ -168,6 +219,17 @@ final class SourcePIDCache {
                 return
             }
 
+            // Collected at most once per call, and only when needed.
+            var collectedItems: [ExtrasMenuBarItem]?
+
+            let now = ContinuousClock.now
+            if lastRevalidation.map({ $0.duration(to: now) >= Self.revalidationInterval }) ?? true {
+                lastRevalidation = now
+                let items = collectExtrasMenuBarItems()
+                collectedItems = items
+                invalidateStalePIDs(for: windows, items: items)
+            }
+
             // Re-read window bounds so we match against current positions.
             // A window that no longer exists is dropped.
             let unresolved: [(windowID: CGWindowID, bounds: CGRect)] = windows.compactMap { window in
@@ -183,7 +245,7 @@ final class SourcePIDCache {
                 return
             }
 
-            let items = collectExtrasMenuBarItems()
+            let items = collectedItems ?? collectExtrasMenuBarItems()
 
             var unclaimedWindowIDs = Set(unresolved.map { $0.windowID })
             var unclaimedItemIndices = Set(items.indices)
@@ -196,6 +258,7 @@ final class SourcePIDCache {
                 }
                 if unclaimedWindowIDs.remove(windowID) != nil {
                     pids[windowID] = items[index].pid
+                    exactWindowIDs.insert(windowID)
                     unclaimedItemIndices.remove(index)
                 }
             }
@@ -262,6 +325,8 @@ final class SourcePIDCache {
             }
 
             // Create a new state that matches the current running apps.
+            let exactWindowIDs = state.exactWindowIDs
+            let lastRevalidation = state.lastRevalidation
             state = runningApps.reduce(into: State()) { result, app in
                 let pid = app.processIdentifier
 
@@ -278,6 +343,8 @@ final class SourcePIDCache {
                     result.pids.merge(pids) { (_, new) in new }
                 }
             }
+            state.exactWindowIDs = exactWindowIDs.intersection(state.pids.keys)
+            state.lastRevalidation = lastRevalidation
         }
     }
 
