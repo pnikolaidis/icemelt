@@ -50,23 +50,19 @@ struct IceMeltSlider<Value: BinaryFloatingPoint, ValueLabel: View>: View {
     }
 
     var body: some View {
-        CompactSlider(
-            value: $value,
-            in: bounds,
-            step: step ?? 0,
-            handleVisibility: .hovering(width: 0),
-            minHeight: 0,
-            gestureOptions: .default.subtracting([.scrollWheel])
-        ) {
-            valueLabel
-                .frame(height: height)
-        }
-        .compactSliderDisabledHapticFeedback(true)
-        .compactSliderSecondaryColor(
-            progressColor: .accentColor.opacity(0.5),
-            focusedProgressColor: .accentColor.opacity(0.75)
-        )
-        .clipShape(borderShape)
-        .contentShape([.interaction, .focusEffect], borderShape)
+        CompactSlider(value: $value, in: bounds, step: step ?? 0)
+            .compactSliderOptionsByRemoving(.scrollWheel, .enabledHapticFeedback)
+            .compactSliderHandleStyle(.rectangle(width: 0))
+            .compactSliderProgress { configuration in
+                Rectangle()
+                    .fill(Color.accentColor.opacity(configuration.focusState.isFocused ? 0.75 : 0.5))
+            }
+            .overlay {
+                valueLabel
+                    .allowsHitTesting(false)
+            }
+            .frame(height: height)
+            .clipShape(borderShape)
+            .contentShape([.interaction, .focusEffect], borderShape)
     }
 }
