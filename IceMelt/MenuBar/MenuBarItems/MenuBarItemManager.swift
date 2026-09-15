@@ -420,6 +420,27 @@ extension MenuBarItemManager {
         let itemWindowIDs = Bridging.getMenuBarWindowList(option: [.itemsOnly, .activeSpace])
         if await cacheActor.cachedItemWindowIDs != itemWindowIDs {
             await cacheItemsRegardless(itemWindowIDs)
+            return
+        }
+
+        // The same windows can still have changed owners: the source PID
+        // service corrects stale attributions as geometry settles, and a
+        // corrected item must not keep its old tag in the cache (issue #44).
+        let cachedTags = itemCache.managedItems.reduce(into: [CGWindowID: MenuBarItemTag]()) { result, item in
+            result[item.windowID] = item.tag
+        }
+        let currentItems = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+        let changed = currentItems.first { item in
+            cachedTags[item.windowID].map { $0 != item.tag } ?? false
+        }
+        if let changed {
+            logger.warning(
+                """
+                Attribution changed for window \(changed.windowID, privacy: .public) \
+                (now \(changed.tag, privacy: .public)), recaching
+                """
+            )
+            await cacheItemsRegardless(itemWindowIDs)
         }
     }
 }
