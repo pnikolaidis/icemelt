@@ -74,6 +74,26 @@ extension MenuBarItemService {
             }
         }
 
+        /// Returns the menu bar items hosted by `MenuBarAgent`.
+        ///
+        /// Returns an empty array when the agent's accessibility tree can't
+        /// be read (for example, before macOS 27, or without permission).
+        func hostedItems() async -> [HostedMenuBarItem] {
+            await withCheckedContinuation { continuation in
+                guard let response = session.send(request: .hostedItems) else {
+                    logger.error("Hosted items request returned nil")
+                    continuation.resume(returning: [])
+                    return
+                }
+                if case .hostedItems(let items) = response {
+                    continuation.resume(returning: items)
+                } else {
+                    logger.error("Hosted items request returned invalid response \(String(describing: response))")
+                    continuation.resume(returning: [])
+                }
+            }
+        }
+
         /// Returns the source process identifiers for the given windows.
         ///
         /// Windows whose source process cannot be determined are omitted

@@ -57,6 +57,23 @@ struct MenuBarItem: CustomStringConvertible {
         tag.isSystemClone
     }
 
+    /// The bit set in the window identifier of a hosted item.
+    ///
+    /// Hosted items have no window of their own, so they are given a
+    /// synthetic identifier derived from their tag. Real window identifiers
+    /// are small numbers, so the flag keeps the two ranges apart.
+    static let hostedWindowIDFlag: CGWindowID = 1 << 30
+
+    /// A Boolean value that indicates whether this item is hosted by
+    /// `MenuBarAgent` (macOS 27 and later) rather than backed by a window.
+    ///
+    /// A hosted item's ``bounds`` are its only geometry: the window server
+    /// APIs cannot resolve its ``windowID``, and it can't be captured, moved
+    /// or clicked through a window.
+    var isHosted: Bool {
+        windowID & Self.hostedWindowIDFlag != 0
+    }
+
     /// The application that owns the item.
     ///
     /// - Note: In macOS 26 and later, this property always returns the
@@ -116,6 +133,9 @@ struct MenuBarItem: CustomStringConvertible {
         // Most items use their computed "best name", but we handle
         // a few special cases for system items.
         let displayName = switch tag.namespace {
+        case .menuBarAgent:
+            // "com.apple.menuextra.controlcenter" -> "Control Center"
+            Self.hostedExtraDisplayName(for: title)
         case .passwords, .weather, .textInputMenuAgent:
             // "PasswordsMenuBarExtra" -> "Passwords"
             // "WeatherMenu" -> "Weather"
@@ -157,6 +177,37 @@ struct MenuBarItem: CustomStringConvertible {
     /// A string to use for logging purposes.
     var logString: String {
         "<\(tag) (windowID: \(windowID))>"
+    }
+
+    /// Returns a display name for a system menu extra hosted by `MenuBarAgent`,
+    /// given its accessibility identifier.
+    private static func hostedExtraDisplayName(for identifier: String) -> String {
+        let key = identifier.replacing(/^com\.apple\.menuextra\./, with: "")
+        return switch key {
+        case "wifi": "Wi‑Fi"
+        case "controlcenter": "Control Center"
+        case "focusmode": "Focus"
+        case "": identifier
+        default: key.prefix(1).uppercased() + key.dropFirst()
+        }
+    }
+
+    /// Creates a menu bar item for an item hosted by `MenuBarAgent`.
+    ///
+    /// The window identifier is synthesized from the tag, so the same item
+    /// keeps the same identifier from one read of the agent's tree to the next.
+    ///
+    /// An item in the system overflow is not on screen. The agent still lists
+    /// it, but at a stacked position that says nothing about where it sits.
+    @available(macOS 27.0, *)
+    private init(hosted item: HostedMenuBarItem, tag: MenuBarItemTag, ownerPID: pid_t, isOnScreen: Bool) {
+        self.tag = tag
+        self.windowID = Self.hostedWindowIDFlag | (CGWindowID(truncatingIfNeeded: tag.hashValue) & (Self.hostedWindowIDFlag - 1))
+        self.ownerPID = ownerPID
+        self.sourcePID = item.sourcePID
+        self.bounds = item.frame
+        self.title = item.identifier
+        self.isOnScreen = isOnScreen
     }
 
     /// Creates a menu bar item without checks.
@@ -251,6 +302,100 @@ extension MenuBarItem {
         }
     }
 
+    /// Creates and returns a list of menu bar items hosted by `MenuBarAgent`,
+    /// for macOS 27 and later.
+    ///
+    /// Every display hosts its own copy of every item, so the list is always
+    /// limited to one display: the given one, or the one with the active menu
+    /// bar. IceMelt's own control items are recognized by matching the hosted
+    /// frames against the frames of the control items' status windows, which
+    /// AppKit keeps in step with the agent's layout. Items of other processes
+    /// are identified by their process, and numbered left to right when a
+    /// process has more than one, since the agent exposes no stable title.
+    @available(macOS 27.0, *)
+    private static func getHostedMenuBarItems(on display: CGDirectDisplayID?) async -> [MenuBarItem] {
+        let hosted = await MenuBarItemService.Connection.shared.hostedItems()
+        guard !hosted.isEmpty else {
+            return []
+        }
+
+        let displayID = display ?? Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
+        let displayBounds = CGDisplayBounds(displayID)
+        var seen = Set<HostedMenuBarItem>()
+        let onDisplay = hosted
+            .filter { displayBounds.intersects($0.hostFrame) }
+            // The agent can list an item twice with the same frame while it
+            // is in the overflow. Keep the first.
+            .filter { seen.insert($0).inserted }
+            .sorted { $0.frame.minX < $1.frame.minX }
+
+        // Items in the overflow are listed stacked at one position; items on
+        // the bar never share one.
+        var countsByMinX = [Int: Int]()
+        for item in onDisplay {
+            countsByMinX[Int(item.frame.minX), default: 0] += 1
+        }
+
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let agentPID = onDisplay.first { $0.isSystemExtra }?.sourcePID
+            ?? NSRunningApplication
+                .runningApplications(withBundleIdentifier: HostedMenuBarItem.agentBundleIdentifier)
+                .first?.processIdentifier
+            ?? 0
+        let controlItemFrames = await ControlItem.hostedFrames
+
+        // Items of other processes are numbered within their namespace, so
+        // two processes of one app (an app and its helper) can't collide.
+        func namespace(for item: HostedMenuBarItem) -> MenuBarItemTag.Namespace {
+            if let app = NSRunningApplication(processIdentifier: item.sourcePID) {
+                .optional(app.bundleIdentifier ?? app.localizedName)
+            } else {
+                .null
+            }
+        }
+        var slotCounts = [MenuBarItemTag.Namespace: Int]()
+        for item in onDisplay where !item.isSystemExtra && item.sourcePID != ownPID {
+            slotCounts[namespace(for: item), default: 0] += 1
+        }
+        var ordinals = [MenuBarItemTag.Namespace: Int]()
+
+        return onDisplay.compactMap { item in
+            let tag: MenuBarItemTag
+            if item.isSystemExtra {
+                guard let identifier = item.identifier else {
+                    return nil
+                }
+                tag = MenuBarItemTag(namespace: .menuBarAgent, title: identifier)
+            } else if item.sourcePID == ownPID {
+                // Match the slot to one of our control items by position. A slot
+                // of ours that matches none is not a control item and is skipped.
+                guard let identifier = controlItemFrames.first(where: { _, frame in
+                    abs(frame.minX - item.frame.minX) <= 2 && abs(frame.minY - item.frame.minY) <= 40
+                })?.key else {
+                    return nil
+                }
+                tag = identifier.tag
+            } else {
+                let namespace = namespace(for: item)
+                let title: String
+                if slotCounts[namespace, default: 0] > 1 {
+                    let ordinal = ordinals[namespace, default: 0]
+                    ordinals[namespace] = ordinal + 1
+                    title = "Item-\(ordinal)"
+                } else {
+                    title = ""
+                }
+                tag = MenuBarItemTag(namespace: namespace, title: title)
+            }
+            return MenuBarItem(
+                hosted: item,
+                tag: tag,
+                ownerPID: agentPID,
+                isOnScreen: countsByMinX[Int(item.frame.minX)] == 1
+            )
+        }
+    }
+
     /// Creates and returns a list of menu bar items, defaulting to the
     /// legacy source pid behavior, prior to macOS 26.
     private static func getMenuBarItemsLegacyMethod(on display: CGDirectDisplayID?, option: ListOption) -> [MenuBarItem] {
@@ -267,7 +412,9 @@ extension MenuBarItem {
     ///   - option: Options that filter the returned list. Pass an empty option set
     ///     to return all available menu bar items.
     static func getMenuBarItems(on display: CGDirectDisplayID? = nil, option: ListOption) async -> [MenuBarItem] {
-        if #available(macOS 26.0, *) {
+        if #available(macOS 27.0, *) {
+            await getHostedMenuBarItems(on: display)
+        } else if #available(macOS 26.0, *) {
             await getMenuBarItemsExperimental(on: display, option: option)
         } else {
             getMenuBarItemsLegacyMethod(on: display, option: option)

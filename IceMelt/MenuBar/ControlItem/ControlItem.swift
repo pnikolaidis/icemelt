@@ -25,6 +25,12 @@ final class ControlItem {
         /// The identifier for the control item for the always-hidden section.
         case alwaysHidden = "Ice.ControlItem.AlwaysHidden"
 
+        /// The autosave name of the companion status item that accompanies
+        /// this control item on macOS 27 (see `StatusItemStorage.companion`).
+        var companionAutosaveName: String {
+            rawValue + ".Companion"
+        }
+
         /// A tag for the control item with this identifier.
         var tag: MenuBarItemTag {
             switch self {
@@ -49,6 +55,16 @@ final class ControlItem {
         }
     }
 
+    /// The frames of the control items currently in the menu bar, in screen
+    /// coordinates, keyed by identifier.
+    ///
+    /// As of macOS 27, the menu bar is hosted by `MenuBarAgent` and the control
+    /// items' windows no longer report a meaningful position through the window
+    /// server. Their AppKit frames still track the agent's layout, which is how
+    /// hosted items are matched back to the control items (see
+    /// ``MenuBarItem/getMenuBarItems(on:option:)``).
+    private(set) static var hostedFrames = [Identifier: CGRect]()
+
     /// A hiding state for a control item.
     enum HidingState {
         case showSection
@@ -58,13 +74,39 @@ final class ControlItem {
     /// A namespace for control item lengths.
     private enum Lengths {
         static let standard: CGFloat = NSStatusItem.variableLength
+
+        /// The length of a section divider that is hiding its section, before
+        /// macOS 27: an item this wide pushes everything to its left off the
+        /// screen. On macOS 27 the length is measured instead; see
+        /// `hostedHidingLengths`.
         static let expanded: CGFloat = 10_000
+
+        /// The padding macOS 27 adds around a status item's length.
+        static let hostedPadding: CGFloat = 16
     }
 
     /// Storage for a control item's underlying status item.
     private final class StatusItemStorage {
         let statusItem: NSStatusItem
         let constraint: NSLayoutConstraint?
+
+        /// A second, blank status item beside a section divider (macOS 27 only).
+        ///
+        /// macOS 27 caps a status item at half its display's width (see
+        /// `Lengths.expanded`), and on a wide display the divider alone can't
+        /// always reach the left edge of the status area to push its whole
+        /// section into the system overflow. The companion doubles the reach.
+        /// It shows and hides with the divider, and expands with it; it never
+        /// has an image or an action.
+        ///
+        /// It is created right after the divider, seeded with a preferred
+        /// position just inside the divider's own slot, so that it lands
+        /// immediately to the divider's left. (macOS 27 places a new item by
+        /// its preferred position, measured leftwards from the trailing end
+        /// of the menu bar as laid out with nothing expanded.) A divider with
+        /// no saved position is placed at the leading end of the status
+        /// items, and so is the companion created just after it.
+        let companion: NSStatusItem?
 
         /// Creates a new storage instance.
         @MainActor
@@ -73,6 +115,18 @@ final class ControlItem {
 
             self.statusItem = NSStatusBar.system.statusItem(withLength: 0)
             self.statusItem.autosaveName = controlItem.identifier.rawValue
+
+            if #available(macOS 27.0, *), controlItem.isSectionDivider {
+                let name = controlItem.identifier.companionAutosaveName
+                let dividerPosition = ControlItemDefaults[.preferredPosition, controlItem.identifier.rawValue]
+                ControlItemDefaults[.preferredPosition, name] = dividerPosition.map { $0 + 12 }
+                let companion = NSStatusBar.system.statusItem(withLength: 0)
+                companion.autosaveName = NSStatusItem.AutosaveName(name)
+                companion.isVisible = statusItem.isVisible
+                self.companion = companion
+            } else {
+                self.companion = nil
+            }
 
             if let button = statusItem.button {
                 // This could break in a new macOS release, but we need this constraint in order to
@@ -109,10 +163,12 @@ final class ControlItem {
         private func removeStatusItem() {
             // Removing the status item has the unwanted side effect of
             // deleting the preferred position. Cache and restore it.
-            let autosaveName = statusItem.autosaveName as String
-            let cached = ControlItemDefaults[.preferredPosition, autosaveName]
-            NSStatusBar.system.removeStatusItem(statusItem)
-            ControlItemDefaults[.preferredPosition, autosaveName] = cached
+            for item in [statusItem, companion].compactMap({ $0 }) {
+                let autosaveName = item.autosaveName as String
+                let cached = ControlItemDefaults[.preferredPosition, autosaveName]
+                NSStatusBar.system.removeStatusItem(item)
+                ControlItemDefaults[.preferredPosition, autosaveName] = cached
+            }
         }
     }
 
@@ -151,6 +207,35 @@ final class ControlItem {
     /// A horizontal constraint for the control item's content view.
     private var constraint: NSLayoutConstraint? {
         storage.constraint
+    }
+
+    /// The control item's companion status item, if it has one.
+    private var companion: NSStatusItem? {
+        storage.companion
+    }
+
+    /// The width the divider and its companion should share to hide the
+    /// section on macOS 27, as last measured by the item manager.
+    private var hostedHidingWidth: CGFloat?
+
+    /// The lengths for the divider and its companion that hide the section
+    /// on macOS 27.
+    ///
+    /// macOS 27 hides an item only by overflowing it, so the divider is made
+    /// as wide as the room between the application menu and the visible
+    /// items, which the item manager measures (see
+    /// `MenuBarItemManager.hostedHidingWidths`). The system discards an item
+    /// wider than half its display, so the width is split with the
+    /// companion, which sits to the divider's left. Until a measurement
+    /// exists, the divider takes the most it can; the first cache corrects it.
+    private var hostedHidingLengths: (divider: CGFloat, companion: CGFloat) {
+        let padding = Lengths.hostedPadding
+        let screenWidth = (NSScreen.screenWithActiveMenuBar ?? NSScreen.main)?.frame.width ?? 1_000
+        let cap = (screenWidth / 2).rounded(.down) - padding
+        let total = hostedHidingWidth ?? cap
+        let divider = min(max(total - padding, 0), cap)
+        let companion = min(max(total - divider - padding, 0), cap)
+        return (divider, companion)
     }
 
     /// A Boolean value that indicates whether the control item serves as
@@ -229,8 +314,23 @@ final class ControlItem {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] frame in
                 self?.frame = frame
+                self?.updateHostedFrame(frame)
             }
             .store(in: &c)
+
+        if let appState, isSectionDivider, #available(macOS 27.0, *) {
+            // The hiding length is measured by the item manager as it caches
+            // (see `hostedHidingLengths`).
+            appState.itemManager.$hostedHidingWidths
+                .map { [identifier] widths in widths[identifier] }
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] width in
+                    self?.hostedHidingWidth = width
+                    self?.updateStatusItem()
+                }
+                .store(in: &c)
+        }
 
         $window.removeNil()
             .flatMap { $0.publisher(for: \.screen) }
@@ -330,6 +430,21 @@ final class ControlItem {
         cancellables = c
     }
 
+    /// Records the control item's frame in ``hostedFrames``, converting from
+    /// AppKit's flipped coordinates to screen coordinates.
+    private func updateHostedFrame(_ frame: CGRect) {
+        guard isAddedToMenuBar, let primaryScreen = NSScreen.screens.first else {
+            Self.hostedFrames[identifier] = nil
+            return
+        }
+        Self.hostedFrames[identifier] = CGRect(
+            x: frame.minX,
+            y: primaryScreen.frame.height - frame.maxY,
+            width: frame.width,
+            height: frame.height
+        )
+    }
+
     /// Updates the appearance of the status item using the current hiding state.
     private func updateStatusItem() {
         guard
@@ -415,6 +530,18 @@ final class ControlItem {
             return
         }
 
+        if #available(macOS 27.0, *), isSectionDivider, isVisible, state == .hideSection {
+            let lengths = hostedHidingLengths
+            constraint?.isActive = true
+            statusItem.length = lengths.divider
+            companion?.length = lengths.companion
+            return
+        }
+
+        // The companion only ever helps to hide; otherwise it is as narrow
+        // as macOS 27 allows (an empty 16 point slot).
+        companion?.length = 0
+
         if isVisible {
             constraint?.isActive = true
             statusItem.length = identifier.length(for: state)
@@ -440,6 +567,7 @@ final class ControlItem {
             return
         }
         statusItem.isVisible = true
+        companion?.isVisible = true
     }
 
     /// Removes the control item from the menu bar.
@@ -449,10 +577,12 @@ final class ControlItem {
         }
         // Setting `statusItem.isVisible` to `false` has the unwanted side
         // effect of deleting the preferred position. Cache and restore it.
-        let autosaveName = statusItem.autosaveName as String
-        let cached = ControlItemDefaults[.preferredPosition, autosaveName]
-        statusItem.isVisible = false
-        ControlItemDefaults[.preferredPosition, autosaveName] = cached
+        for item in [statusItem, companion].compactMap({ $0 }) {
+            let autosaveName = item.autosaveName as String
+            let cached = ControlItemDefaults[.preferredPosition, autosaveName]
+            item.isVisible = false
+            ControlItemDefaults[.preferredPosition, autosaveName] = cached
+        }
     }
 
     /// Performs the control item's action.

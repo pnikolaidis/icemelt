@@ -218,6 +218,14 @@ final class MenuBarItemImageCache: ObservableObject {
 
     /// Captures the images of the given menu bar items and returns the result.
     private nonisolated func captureImages(of items: [MenuBarItem], scale: CGFloat, appState: AppState) async -> CaptureResult {
+        // Hosted items (macOS 27) have no windows to capture. Exclude them all
+        // so they get the app-icon fallback, without a round of failed captures.
+        if items.allSatisfy(\.isHosted) {
+            var result = CaptureResult()
+            result.excluded = items
+            return result
+        }
+
         // Use individual capture after a move operation, since composite capture
         // doesn't account for overlapping items.
         if await appState.itemManager.lastMoveOperationOccurred(within: .seconds(2)) {
@@ -253,7 +261,7 @@ final class MenuBarItemImageCache: ObservableObject {
     /// Used when Screen Recording permission is missing, or when capture
     /// fails for an individual item (both common on macOS 26).
     private nonisolated func fallbackImage(for item: MenuBarItem, scale: CGFloat) -> CapturedImage? {
-        guard let icon = (item.sourceApplication ?? item.owningApplication)?.icon else {
+        guard let icon = hostedExtraSymbol(for: item) ?? (item.sourceApplication ?? item.owningApplication)?.icon else {
             return nil
         }
 
@@ -300,6 +308,27 @@ final class MenuBarItemImageCache: ObservableObject {
             return nil
         }
         return CapturedImage(cgImage: image, scale: scale)
+    }
+
+    /// Returns a symbol standing in for a system menu extra hosted by
+    /// `MenuBarAgent` (macOS 27), whose "source app" has no icon of its own.
+    private nonisolated func hostedExtraSymbol(for item: MenuBarItem) -> NSImage? {
+        guard item.tag.namespace == .menuBarAgent else {
+            return nil
+        }
+        let name = switch item.tag.title.replacing(/^com\.apple\.menuextra\./, with: "") {
+        case "wifi": "wifi"
+        case "battery": "battery.75percent"
+        case "sound": "speaker.wave.2.fill"
+        case "focusmode": "moon.fill"
+        case "clock": "clock"
+        case "controlcenter": "switch.2"
+        case "bluetooth": "bluetooth" // Not an SF Symbol; falls through to the generic one below.
+        default: "menubar.rectangle"
+        }
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: item.displayName)
+            ?? NSImage(systemSymbolName: "menubar.rectangle", accessibilityDescription: item.displayName)
+        return image?.withSymbolConfiguration(.init(pointSize: 14, weight: .regular))
     }
 
     /// Captures the images of the menu bar items in the given section and returns
