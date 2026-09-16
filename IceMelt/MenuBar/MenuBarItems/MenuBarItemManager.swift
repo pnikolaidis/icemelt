@@ -18,10 +18,10 @@ final class MenuBarItemManager: ObservableObject {
     /// most recent cache operation.
     @Published private(set) var activeMenuBarDisplayID: CGDirectDisplayID?
 
-    /// How wide each section divider, together with its companion, should be
-    /// to hide its section on macOS 27, keyed by the divider's identifier
-    /// (see ``hostedHidingWidth(for:in:regionLeft:)``). Updated with each
-    /// cache operation; a divider that couldn't be measured is absent.
+    /// How wide each section divider should be to hide its section on
+    /// macOS 27, keyed by the divider's identifier (see
+    /// ``hostedHidingWidth(for:in:regionLeft:)``). Updated with each cache
+    /// operation; a divider that couldn't be measured is absent.
     @Published private(set) var hostedHidingWidths = [ControlItem.Identifier: CGFloat]()
 
     /// Logger for the menu bar item manager.
@@ -453,11 +453,14 @@ extension MenuBarItemManager {
     private func updateHostedHidingWidths(items: [MenuBarItem], displayID: CGDirectDisplayID) {
         guard
             let screen = NSScreen.screens.first(where: { $0.displayID == displayID }),
-            var regionLeft = screen.getApplicationMenuFrame()?.maxX
+            let applicationMenuFrame = screen.getApplicationMenuFrame()
         else {
-            hostedHidingWidths = [:]
             return
         }
+        // The application menu is always reported on the main display, but
+        // it is the same width on every display.
+        let displayBounds = CGDisplayBounds(displayID)
+        var regionLeft = displayBounds.minX + (applicationMenuFrame.maxX - CGDisplayBounds(CGMainDisplayID()).minX)
         if let notch = screen.frameOfNotch {
             regionLeft = max(regionLeft, notch.maxX)
         }
@@ -467,15 +470,24 @@ extension MenuBarItemManager {
         // the bar, so they don't bound the room.
         let onBar = items.filter(\.isOnScreen)
 
-        var widths = [ControlItem.Identifier: CGFloat]()
+        var widths = hostedHidingWidths
         for identifier in [ControlItem.Identifier.hidden, .alwaysHidden] {
-            widths[identifier] = hostedHidingWidth(for: identifier, in: onBar, regionLeft: regionLeft)
+            guard let width = hostedHidingWidth(for: identifier, in: onBar, regionLeft: regionLeft) else {
+                continue
+            }
+            // Every change reflows the bar, so ignore ones too small to matter.
+            if let current = widths[identifier], abs(current - width) < 8 {
+                continue
+            }
+            widths[identifier] = width
         }
-        hostedHidingWidths = widths.compactMapValues { $0 }
+        if widths != hostedHidingWidths {
+            hostedHidingWidths = widths
+        }
     }
 
-    /// Returns the width that the given divider and its companion should
-    /// share to hide their section, or `nil` if it can't be determined.
+    /// Returns the width that the given divider should have to hide its
+    /// section, or `nil` if it can't be determined.
     ///
     /// The first item that must stay visible is the divider's right-hand
     /// neighbour. If the divider is not on the bar (it overflowed, so it is
