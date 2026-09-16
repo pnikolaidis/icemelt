@@ -87,6 +87,9 @@ extension MenuBarItemTag {
         if #unavailable(macOS 26.0) {
             items.append(siri)
         }
+        if #available(macOS 27.0, *) {
+            items.append(contentsOf: [hostedClock, hostedControlCenter])
+        }
         return items
     }()
 
@@ -149,6 +152,14 @@ extension MenuBarItemTag {
 
     /// The tag for the system "Siri" item.
     static let siri = MenuBarItemTag(namespace: .systemUIServer, title: "Siri")
+
+    /// The tag for the system "Clock" menu extra, as hosted by `MenuBarAgent`
+    /// in macOS 27 and later.
+    static let hostedClock = MenuBarItemTag(namespace: .menuBarAgent, title: "com.apple.menuextra.clock")
+
+    /// The tag for the system "Control Center" menu extra, as hosted by
+    /// `MenuBarAgent` in macOS 27 and later.
+    static let hostedControlCenter = MenuBarItemTag(namespace: .menuBarAgent, title: "com.apple.menuextra.controlcenter")
 
     /// The tag for the system "Time Machine" item.
     static let timeMachine = if #available(macOS 26.0, *) {
@@ -227,6 +238,10 @@ extension MenuBarItemTag.Namespace {
 
     /// The namespace for the "Control Center" process.
     static let controlCenter = string("com.apple.controlcenter")
+
+    /// The namespace for the "MenuBarAgent" process, which hosts the system
+    /// menu extras in macOS 27 and later.
+    static let menuBarAgent = string(HostedMenuBarItem.agentBundleIdentifier)
 
     /// The namespace for the "PasswordsMenuBarExtra" process.
     static let passwords = string("com.apple.Passwords.MenuBarExtra")

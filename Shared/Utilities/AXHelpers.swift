@@ -30,6 +30,10 @@ enum AXHelpers {
         queue.sync { try? app.attribute(.extrasMenuBar) }
     }
 
+    static func windows(for app: Application) -> [UIElement] {
+        queue.sync { try? app.windows() } ?? []
+    }
+
     static func children(for element: UIElement) -> [UIElement] {
         queue.sync { try? element.arrayAttribute(.children) } ?? []
     }
@@ -40,6 +44,16 @@ enum AXHelpers {
 
     static func frame(for element: UIElement) -> CGRect? {
         queue.sync { try? element.attribute(.frame) }
+    }
+
+    static func identifier(for element: UIElement) -> String? {
+        queue.sync { try? element.attribute(.identifier) }
+    }
+
+    /// Returns the identifier of the process that vends the given element.
+    /// This is read from the element itself, without messaging its process.
+    static func pid(for element: UIElement) -> pid_t? {
+        queue.sync { try? element.pid() }
     }
 
     static func role(for element: UIElement) -> Role? {
