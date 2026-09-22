@@ -2023,8 +2023,9 @@ extension MenuBarItemManager {
     /// Context for a section shown temporarily to click one of its hosted
     /// items.
     private final class HostedShownSectionContext {
-        /// The section that was shown.
-        let section: MenuBarSection.Name
+        /// The sections that were shown: the item's own, and the hidden
+        /// section too when the item is always-hidden.
+        let sections: [MenuBarSection.Name]
 
         /// The window of the clicked item's shown interface.
         var shownInterfaceWindow: WindowInfo?
@@ -2032,8 +2033,8 @@ extension MenuBarItemManager {
         /// When the section was shown.
         let shownAt = ContinuousClock.now
 
-        init(section: MenuBarSection.Name) {
-            self.section = section
+        init(sections: [MenuBarSection.Name]) {
+            self.sections = sections
         }
     }
 
@@ -2150,7 +2151,7 @@ extension MenuBarItemManager {
         }
         if !shownSections.isEmpty {
             logger.debug("Temporarily showing \(shownSections, privacy: .public) for \(item.logString, privacy: .public)")
-            let context = HostedShownSectionContext(section: sectionName)
+            let context = HostedShownSectionContext(sections: shownSections)
             hostedShownSectionContexts.append(context)
             rehideTimer?.invalidate()
             defer {
@@ -2214,8 +2215,8 @@ extension MenuBarItemManager {
         let contexts = hostedShownSectionContexts
         hostedShownSectionContexts.removeAll()
         logger.debug("Rehiding temporarily shown sections")
-        for context in contexts {
-            appState.menuBarManager.section(withName: context.section)?.hide()
+        for section in Set(contexts.flatMap(\.sections)) {
+            appState.menuBarManager.section(withName: section)?.hide()
         }
     }
 }
