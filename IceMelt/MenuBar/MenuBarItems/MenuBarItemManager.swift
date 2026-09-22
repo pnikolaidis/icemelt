@@ -24,6 +24,23 @@ final class MenuBarItemManager: ObservableObject {
     /// operation; a divider that couldn't be measured is absent.
     @Published private(set) var hostedHidingWidths = [ControlItem.Identifier: CGFloat]()
 
+    /// Where each of the dividers' spacers landed relative to the sections
+    /// on macOS 27, keyed by the spacer's tag, as of the most recent cache
+    /// operation (see ``hostedSpacerPlacements(spacers:items:controlItems:)``). A spacer
+    /// that couldn't be judged is absent.
+    @Published private(set) var hostedSpacerPlacements = [MenuBarItemTag: HostedSpacerPlacement]()
+
+    /// Where a divider's spacer landed relative to the sections on macOS 27.
+    enum HostedSpacerPlacement {
+        /// Between the section the divider hides and the items that stay
+        /// visible, where it fills room.
+        case fits
+        /// Left of an item the divider should hide.
+        case tooFarLeading
+        /// Right of an item that stays visible.
+        case tooFarTrailing
+    }
+
     /// Logger for the menu bar item manager.
     private nonisolated let logger = Logger.menuBarItemManager
 
@@ -411,10 +428,20 @@ extension MenuBarItemManager {
 
             let displayID = Bridging.getActiveMenuBarDisplayID()
             activeMenuBarDisplayID = displayID
-            var items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+            var items: [MenuBarItem]
+            var hostedSpacers = [MenuBarItem]()
 
-            if #available(macOS 27.0, *), let displayID {
-                updateHostedHidingWidths(items: items, displayID: displayID)
+            if #available(macOS 27.0, *) {
+                // One read of the agent's tree serves the active display's
+                // items, the measurement on every display, and the spacers'
+                // placements. The spacers are ours, so the cache never sees them.
+                let itemsByDisplay = await MenuBarItem.getHostedMenuBarItemsByDisplay(includingSpacers: true)
+                let activeItems = itemsByDisplay[displayID ?? CGMainDisplayID()] ?? []
+                items = activeItems.filter { !$0.tag.isHostedSpacer }
+                hostedSpacers = activeItems.filter { $0.tag.isHostedSpacer }
+                updateHostedHidingWidths(itemsByDisplay: itemsByDisplay.mapValues { $0.filter { !$0.tag.isHostedSpacer } })
+            } else {
+                items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             }
 
             let itemWindowIDs = currentItemWindowIDs ?? items.reversed().map { $0.windowID }
@@ -434,47 +461,117 @@ extension MenuBarItemManager {
 
             await enforceControlItemOrder(controlItems: controlItems)
             await uncheckedCacheItems(items: items, controlItems: controlItems, displayID: displayID)
+
+            if #available(macOS 27.0, *) {
+                // Published on every pass: a spacer re-created at a new position
+                // may land with the same verdict, and still needs the next step.
+                hostedSpacerPlacements = hostedSpacerPlacements(spacers: hostedSpacers, items: items, controlItems: controlItems)
+            }
         }
     }
 
-    /// Updates ``hostedHidingWidths`` from the given hosted items.
+    /// Returns where each of the given spacers landed relative to the
+    /// sections, judged against the items just cached.
+    ///
+    /// A spacer fills room only between the section its divider hides and
+    /// the items that stay visible (see `ControlItem.updateSpacers(lengths:)`).
+    /// The divider itself is excluded, since the spacer may sit on either
+    /// side of it. A spacer in the overflow is left of everything on the
+    /// bar: out of place if any item it should hide is still on the bar, and
+    /// otherwise in place, since the whole section overflowed with it.
+    @available(macOS 27.0, *)
+    private func hostedSpacerPlacements(
+        spacers: [MenuBarItem],
+        items: [MenuBarItem],
+        controlItems: ControlItemPair
+    ) -> [MenuBarItemTag: HostedSpacerPlacement] {
+        var placements = [MenuBarItemTag: HostedSpacerPlacement]()
+        for spacer in spacers {
+            guard let owner = spacer.tag.hostedSpacerOwner else {
+                continue
+            }
+            let hiddenSections: [MenuBarSection.Name] = owner == .alwaysHidden ? [.alwaysHidden] : [.hidden, .alwaysHidden]
+            var hiddenBySpacer = [MenuBarItem]()
+            var keptVisible = [MenuBarItem]()
+            // The hidden divider stays visible when only the always-hidden
+            // section is hidden. (The dividers are no longer in `items`.)
+            if owner == .alwaysHidden, controlItems.hidden.isOnScreen {
+                keptVisible.append(controlItems.hidden)
+            }
+            for item in items where item.isOnScreen {
+                guard let section = itemCache.address(for: item.tag)?.section else {
+                    continue
+                }
+                if hiddenSections.contains(section) {
+                    hiddenBySpacer.append(item)
+                } else {
+                    keptVisible.append(item)
+                }
+            }
+            if !spacer.isOnScreen {
+                placements[spacer.tag] = hiddenBySpacer.isEmpty ? .fits : .tooFarLeading
+            } else if hiddenBySpacer.contains(where: { $0.bounds.minX > spacer.bounds.minX }) {
+                placements[spacer.tag] = .tooFarLeading
+            } else if keptVisible.contains(where: { $0.bounds.minX < spacer.bounds.minX }) {
+                placements[spacer.tag] = .tooFarTrailing
+            } else {
+                placements[spacer.tag] = .fits
+            }
+        }
+        return placements
+    }
+
+    /// Updates ``hostedHidingWidths`` from the given hosted items, keyed by
+    /// display.
     ///
     /// macOS 27 lays the menu bar out itself: items are packed from the
     /// trailing end, and whatever doesn't fit between the application menu
     /// and the trailing items goes into the system's overflow. That overflow
     /// is the only way to hide an item, so a divider hides its section by
-    /// being just wide enough that the section no longer fits. Too narrow
-    /// and the section's leading items stay visible; too wide and the
-    /// divider overflows too, taking the section out of the agent's
-    /// accessibility tree so it can't be listed. The target is the room
-    /// between the application menu and the first item that must stay
-    /// visible, less a margin narrower than any item.
+    /// being just wide enough, with its spacers, that the section no longer
+    /// fits. Too narrow and the section's leading items stay visible; too
+    /// wide and the visible section's leading items overflow too. The target
+    /// is the room between the application menu and the first item that must
+    /// stay visible, less a margin narrower than any item.
+    ///
+    /// A status item has one length on every display, so the room is
+    /// measured on every display and the widest wins: filling it hides the
+    /// section on the wide display, and on a narrower one the divider and
+    /// its spacers simply overflow along with the section (see
+    /// `ControlItem.hostedHidingLengths`).
     @available(macOS 27.0, *)
-    private func updateHostedHidingWidths(items: [MenuBarItem], displayID: CGDirectDisplayID) {
-        guard
-            let screen = NSScreen.screens.first(where: { $0.displayID == displayID }),
-            let applicationMenuFrame = screen.getApplicationMenuFrame()
-        else {
+    private func updateHostedHidingWidths(itemsByDisplay: [CGDirectDisplayID: [MenuBarItem]]) {
+        guard let applicationMenuFrame = NSScreen.screens.first?.getApplicationMenuFrame() else {
             return
         }
-        // The application menu is always reported on the main display, but
-        // it is the same width on every display.
-        let displayBounds = CGDisplayBounds(displayID)
-        var regionLeft = displayBounds.minX + (applicationMenuFrame.maxX - CGDisplayBounds(CGMainDisplayID()).minX)
-        if let notch = screen.frameOfNotch {
-            regionLeft = max(regionLeft, notch.maxX)
-        }
-        regionLeft += 16 // The agent's own leading padding.
-
-        // Items in the overflow are sometimes still listed. They aren't on
-        // the bar, so they don't bound the room.
-        let onBar = items.filter(\.isOnScreen)
-
-        var widths = hostedHidingWidths
-        for identifier in [ControlItem.Identifier.hidden, .alwaysHidden] {
-            guard let width = hostedHidingWidth(for: identifier, in: onBar, regionLeft: regionLeft) else {
+        var measured = [ControlItem.Identifier: CGFloat]()
+        for (displayID, items) in itemsByDisplay {
+            guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
                 continue
             }
+            // The application menu is always reported on the main display, but
+            // it is the same width on every display.
+            let displayBounds = CGDisplayBounds(displayID)
+            var regionLeft = displayBounds.minX + (applicationMenuFrame.maxX - CGDisplayBounds(CGMainDisplayID()).minX)
+            if let notch = screen.frameOfNotch {
+                regionLeft = max(regionLeft, notch.maxX)
+            }
+            regionLeft += 16 // The agent's own leading padding.
+
+            // Items in the overflow are sometimes still listed. They aren't on
+            // the bar, so they don't bound the room.
+            let onBar = items.filter(\.isOnScreen)
+
+            for identifier in [ControlItem.Identifier.hidden, .alwaysHidden] {
+                guard let width = hostedHidingWidth(for: identifier, in: onBar, regionLeft: regionLeft) else {
+                    continue
+                }
+                measured[identifier] = max(measured[identifier] ?? 0, width)
+            }
+        }
+
+        var widths = hostedHidingWidths
+        for (identifier, width) in measured {
             // Every change reflows the bar, so ignore ones too small to matter.
             if let current = widths[identifier], abs(current - width) < 8 {
                 continue
@@ -486,25 +583,41 @@ extension MenuBarItemManager {
         }
     }
 
-    /// Returns the width that the given divider should have to hide its
-    /// section, or `nil` if it can't be determined.
+    /// Returns the width that the given divider should have, with its
+    /// spacers, to hide its section, or `nil` if it can't be determined.
     ///
-    /// The first item that must stay visible is the divider's right-hand
-    /// neighbour. If the divider is not on the bar (it overflowed, so it is
-    /// too wide), everything on the bar is visible, and its leading item is
-    /// the bound.
+    /// The bound is the leading edge of the first item that must stay
+    /// visible: the leftmost item on the bar that belongs to a section the
+    /// divider doesn't hide, as of the previous cache. That holds whether
+    /// the section is shown or hidden, and whether the divider and its
+    /// spacers landed where they should, so a bad layout can't feed itself
+    /// a bad measurement. An item not yet cached is placed by the divider's
+    /// position, or counted as visible when the divider is not on the bar:
+    /// the divider overflows only along with everything left of it, so
+    /// whatever remains on the bar is visible.
     @available(macOS 27.0, *)
     private func hostedHidingWidth(
         for identifier: ControlItem.Identifier,
         in onBar: [MenuBarItem],
         regionLeft: CGFloat
     ) -> CGFloat? {
-        let visibleFrom: CGFloat
-        if let divider = onBar.first(matching: identifier.tag) {
-            visibleFrom = divider.bounds.maxX
-        } else if let leading = onBar.map(\.bounds.minX).min() {
-            visibleFrom = leading
-        } else {
+        let hiddenSections: [MenuBarSection.Name] = identifier == .alwaysHidden ? [.alwaysHidden] : [.hidden, .alwaysHidden]
+        let divider = onBar.first(matching: identifier.tag)
+        let visibleFrom = onBar.compactMap { item -> CGFloat? in
+            if item.isControlItem {
+                // The hidden divider stays visible when only the always-hidden
+                // section is hidden; the dividers otherwise don't count.
+                return item.tag == .hiddenControlItem && identifier == .alwaysHidden ? item.bounds.minX : nil
+            }
+            if let section = itemCache.address(for: item.tag)?.section {
+                return hiddenSections.contains(section) ? nil : item.bounds.minX
+            }
+            if let divider, item.bounds.minX < divider.bounds.maxX {
+                return nil
+            }
+            return item.bounds.minX
+        }.min()
+        guard let visibleFrom else {
             return nil
         }
         // The margin must be narrower than any item, or the section's last

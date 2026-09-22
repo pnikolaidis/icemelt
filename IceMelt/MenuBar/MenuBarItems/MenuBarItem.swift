@@ -302,47 +302,37 @@ extension MenuBarItem {
         }
     }
 
-    /// Creates and returns a list of menu bar items hosted by `MenuBarAgent`,
-    /// for macOS 27 and later.
+    /// Creates and returns the menu bar items hosted by `MenuBarAgent`, for
+    /// macOS 27 and later, keyed by the display that hosts them.
     ///
-    /// Every display hosts its own copy of every item, so the list is always
-    /// limited to one display: the given one, or the one with the active menu
-    /// bar. IceMelt's own control items are recognized by matching the hosted
-    /// frames against the frames of the control items' status windows, which
-    /// AppKit keeps in step with the agent's layout. Items of other processes
-    /// are identified by their process, and numbered left to right when a
-    /// process has more than one, since the agent exposes no stable title.
+    /// Every display hosts its own copy of every item. IceMelt's own control
+    /// items are recognized by matching the hosted frames against the frames
+    /// of the control items' status windows, which AppKit keeps in step with
+    /// the agent's layout; the blank spacers a divider hides its section with
+    /// are recognized the same way, and are included only when asked for,
+    /// since nothing but the item manager's measurement should see them.
+    /// Items of other processes are identified by their process, and numbered
+    /// left to right when a process has more than one, since the agent
+    /// exposes no stable title.
     @available(macOS 27.0, *)
-    private static func getHostedMenuBarItems(on display: CGDirectDisplayID?) async -> [MenuBarItem] {
+    static func getHostedMenuBarItemsByDisplay(includingSpacers: Bool = false) async -> [CGDirectDisplayID: [MenuBarItem]] {
         let hosted = await MenuBarItemService.Connection.shared.hostedItems()
         guard !hosted.isEmpty else {
-            return []
-        }
-
-        let displayID = display ?? Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
-        let displayBounds = CGDisplayBounds(displayID)
-        var seen = Set<HostedMenuBarItem>()
-        let onDisplay = hosted
-            .filter { displayBounds.intersects($0.hostFrame) }
-            // The agent can list an item twice with the same frame while it
-            // is in the overflow. Keep the first.
-            .filter { seen.insert($0).inserted }
-            .sorted { $0.frame.minX < $1.frame.minX }
-
-        // Items in the overflow are listed stacked at one position; items on
-        // the bar never share one.
-        var countsByMinX = [Int: Int]()
-        for item in onDisplay {
-            countsByMinX[Int(item.frame.minX), default: 0] += 1
+            return [:]
         }
 
         let ownPID = ProcessInfo.processInfo.processIdentifier
-        let agentPID = onDisplay.first { $0.isSystemExtra }?.sourcePID
+        let agentPID = hosted.first { $0.isSystemExtra }?.sourcePID
             ?? NSRunningApplication
                 .runningApplications(withBundleIdentifier: HostedMenuBarItem.agentBundleIdentifier)
                 .first?.processIdentifier
             ?? 0
-        let controlItemFrames = await ControlItem.hostedFrames
+        var ownFrames = await ControlItem.hostedFrames.reduce(into: [MenuBarItemTag: CGRect]()) { result, entry in
+            result[entry.key.tag] = entry.value
+        }
+        if includingSpacers {
+            ownFrames.merge(await ControlItem.hostedSpacerFrames) { current, _ in current }
+        }
 
         // Items of other processes are numbered within their namespace, so
         // two processes of one app (an app and its helper) can't collide.
@@ -353,47 +343,83 @@ extension MenuBarItem {
                 .null
             }
         }
-        var slotCounts = [MenuBarItemTag.Namespace: Int]()
-        for item in onDisplay where !item.isSystemExtra && item.sourcePID != ownPID {
-            slotCounts[namespace(for: item), default: 0] += 1
-        }
-        var ordinals = [MenuBarItemTag.Namespace: Int]()
 
-        return onDisplay.compactMap { item in
-            let tag: MenuBarItemTag
-            if item.isSystemExtra {
-                guard let identifier = item.identifier else {
-                    return nil
-                }
-                tag = MenuBarItemTag(namespace: .menuBarAgent, title: identifier)
-            } else if item.sourcePID == ownPID {
-                // Match the slot to one of our control items by position. A slot
-                // of ours that matches none is not a control item and is skipped.
-                guard let identifier = controlItemFrames.first(where: { _, frame in
-                    abs(frame.minX - item.frame.minX) <= 2 && abs(frame.minY - item.frame.minY) <= 40
-                })?.key else {
-                    return nil
-                }
-                tag = identifier.tag
-            } else {
-                let namespace = namespace(for: item)
-                let title: String
-                if slotCounts[namespace, default: 0] > 1 {
-                    let ordinal = ordinals[namespace, default: 0]
-                    ordinals[namespace] = ordinal + 1
-                    title = "Item-\(ordinal)"
-                } else {
-                    title = ""
-                }
-                tag = MenuBarItemTag(namespace: namespace, title: title)
+        var result = [CGDirectDisplayID: [MenuBarItem]]()
+        let displayIDs = NSScreen.screens.map(\.displayID)
+
+        for displayID in displayIDs {
+            let displayBounds = CGDisplayBounds(displayID)
+            var seen = Set<HostedMenuBarItem>()
+            let onDisplay = hosted
+                .filter { displayBounds.intersects($0.hostFrame) }
+                // The agent can list an item twice with the same frame while it
+                // is in the overflow. Keep the first.
+                .filter { seen.insert($0).inserted }
+                .sorted { $0.frame.minX < $1.frame.minX }
+
+            // Items in the overflow are listed stacked at one position; items on
+            // the bar never share one.
+            var countsByMinX = [Int: Int]()
+            for item in onDisplay {
+                countsByMinX[Int(item.frame.minX), default: 0] += 1
             }
-            return MenuBarItem(
-                hosted: item,
-                tag: tag,
-                ownerPID: agentPID,
-                isOnScreen: countsByMinX[Int(item.frame.minX)] == 1
-            )
+
+            var slotCounts = [MenuBarItemTag.Namespace: Int]()
+            for item in onDisplay where !item.isSystemExtra && item.sourcePID != ownPID {
+                slotCounts[namespace(for: item), default: 0] += 1
+            }
+            var ordinals = [MenuBarItemTag.Namespace: Int]()
+
+            result[displayID] = onDisplay.compactMap { item in
+                let tag: MenuBarItemTag
+                if item.isSystemExtra {
+                    guard let identifier = item.identifier else {
+                        return nil
+                    }
+                    tag = MenuBarItemTag(namespace: .menuBarAgent, title: identifier)
+                } else if item.sourcePID == ownPID {
+                    // Match the slot to the nearest of our items by position. A
+                    // slot of ours that matches none is skipped: a spacer when
+                    // spacers weren't asked for, or a status window that has not
+                    // caught up with the agent's layout yet.
+                    let candidates = ownFrames.filter { _, frame in
+                        abs(frame.minX - item.frame.minX) <= 2 && abs(frame.minY - item.frame.minY) <= 40
+                    }
+                    guard let match = candidates.min(by: { abs($0.value.minX - item.frame.minX) < abs($1.value.minX - item.frame.minX) }) else {
+                        return nil
+                    }
+                    tag = match.key
+                } else {
+                    let namespace = namespace(for: item)
+                    let title: String
+                    if slotCounts[namespace, default: 0] > 1 {
+                        let ordinal = ordinals[namespace, default: 0]
+                        ordinals[namespace] = ordinal + 1
+                        title = "Item-\(ordinal)"
+                    } else {
+                        title = ""
+                    }
+                    tag = MenuBarItemTag(namespace: namespace, title: title)
+                }
+                return MenuBarItem(
+                    hosted: item,
+                    tag: tag,
+                    ownerPID: agentPID,
+                    isOnScreen: countsByMinX[Int(item.frame.minX)] == 1
+                )
+            }
         }
+
+        return result
+    }
+
+    /// Creates and returns a list of menu bar items hosted by `MenuBarAgent`,
+    /// for macOS 27 and later, on the given display, or on the one with the
+    /// active menu bar. See ``getHostedMenuBarItemsByDisplay(includingSpacers:)``.
+    @available(macOS 27.0, *)
+    private static func getHostedMenuBarItems(on display: CGDirectDisplayID?) async -> [MenuBarItem] {
+        let displayID = display ?? Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
+        return await getHostedMenuBarItemsByDisplay()[displayID] ?? []
     }
 
     /// Creates and returns a list of menu bar items, defaulting to the
