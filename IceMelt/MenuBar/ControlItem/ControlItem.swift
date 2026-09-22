@@ -77,6 +77,12 @@ final class ControlItem {
 
         /// The padding macOS 27 adds around a status item's length.
         static let hostedPadding: CGFloat = 16
+
+        /// The most items a divider may use to hide its section on macOS 27,
+        /// itself included. Four covers the widest display Apple sells with
+        /// room to spare; the bound keeps a bad measurement from filling the
+        /// menu bar with blank items.
+        static let maxHidingItems = 4
     }
 
     /// Storage for a control item's underlying status item.
@@ -175,22 +181,36 @@ final class ControlItem {
     /// as last measured by the item manager.
     private var hostedHidingWidth: CGFloat?
 
-    /// The length that hides the section on macOS 27.
+    /// Blank status items that fill the room the divider can't cover on its
+    /// own, on macOS 27. See ``hostedHidingLengths``.
+    private var spacers = [NSStatusItem]()
+
+    /// The lengths of the items that hide the section on macOS 27: the
+    /// divider first, then one for each spacer beside it.
     ///
-    /// macOS 27 hides an item only by overflowing it, so the divider is made
-    /// as wide as the room between the application menu and the visible
-    /// items, which the item manager measures (see
+    /// macOS 27 hides an item only by overflowing it, so the section is
+    /// hidden by filling the room between the application menu and the
+    /// visible items, which the item manager measures (see
     /// `MenuBarItemManager.hostedHidingWidths`). The system discards an item
-    /// wider than half its display, so on a wide display with few visible
-    /// items the divider can fall short and the section's leading items stay
-    /// on the bar. Until a measurement exists, the divider takes the most it
-    /// can; the first cache corrects it.
-    private var hostedHidingLength: CGFloat {
+    /// wider than half its display, so on a wide display the divider alone
+    /// falls short — a 3840pt display needs ~2900pt of filling and allows
+    /// 1904pt per item. The shortfall is made up with blank spacer items,
+    /// which fill the same room without being wider than the cap. The room is
+    /// divided evenly, so no spacer is near the cap unless it has to be.
+    /// Until a measurement exists, the divider takes the most it can; the
+    /// first cache corrects it.
+    private var hostedHidingLengths: [CGFloat] {
         let padding = Lengths.hostedPadding
         let screenWidth = (NSScreen.screenWithActiveMenuBar ?? NSScreen.main)?.frame.width ?? 1_000
         let cap = (screenWidth / 2).rounded(.down) - padding
-        let width = hostedHidingWidth ?? cap
-        return min(max(width - padding, 0), cap)
+        guard let width = hostedHidingWidth else {
+            return [cap]
+        }
+        // Each item occupies its length plus the agent's padding.
+        let slot = cap + padding
+        let count = min(max(Int((width / slot).rounded(.up)), 1), Lengths.maxHidingItems)
+        let length = min(max(width / CGFloat(count) - padding, 0), cap)
+        return Array(repeating: length, count: count)
     }
 
     /// A Boolean value that indicates whether the control item serves as
@@ -487,8 +507,14 @@ final class ControlItem {
 
         if #available(macOS 27.0, *), isSectionDivider, isVisible, state == .hideSection {
             constraint?.isActive = true
-            statusItem.length = hostedHidingLength
+            let lengths = hostedHidingLengths
+            statusItem.length = lengths[0]
+            updateSpacers(lengths: Array(lengths.dropFirst()))
             return
+        }
+
+        if #available(macOS 27.0, *), isSectionDivider {
+            updateSpacers(lengths: [])
         }
 
         if isVisible {
@@ -507,6 +533,51 @@ final class ControlItem {
                 let size = withMutableCopy(of: window.frame.size) { $0.width = shouldShow ? 3 : 1 }
                 window.setContentSize(size)
             }
+        }
+    }
+
+    /// Returns the `NSStatusItem` autosave name for the spacer at the given
+    /// index beside this divider.
+    private func spacerAutosaveName(at index: Int) -> String {
+        "\(identifier.rawValue).Spacer\(index)"
+    }
+
+    /// Matches the divider's spacer items to the given lengths, creating and
+    /// removing them as needed.
+    ///
+    /// The spacers are blank, have no action, and are never matched to a
+    /// control item, so `MenuBarItem.getMenuBarItems(on:option:)` skips them
+    /// along with any other slot of ours that isn't a control item. They are
+    /// removed rather than collapsed when the section is shown: a zero-length
+    /// item still occupies the agent's padding, which would leave a gap.
+    @available(macOS 27.0, *)
+    private func updateSpacers(lengths: [CGFloat]) {
+        while spacers.count > lengths.count {
+            NSStatusBar.system.removeStatusItem(spacers.removeLast())
+        }
+        while spacers.count < lengths.count {
+            // A spacer with no preferred position is placed at the leading end
+            // of the bar, where it overflows at once and fills nothing, so
+            // each one is created with a position of its own. macOS 27 honors
+            // the preferred position of a *new* item, measured leftwards from
+            // the trailing end, but on a layout of natural widths, which the
+            // expanded divider is not part of: a spacer can land on either
+            // side of the divider at first, and settles into the room being
+            // filled as the measurement converges. Only the total width
+            // filled decides whether the section hides.
+            let autosaveName = spacerAutosaveName(at: spacers.count)
+            let dividerPosition = ControlItemDefaults[.preferredPosition, identifier.rawValue] ?? 1
+            ControlItemDefaults[.preferredPosition, autosaveName] = dividerPosition + CGFloat(spacers.count + 1)
+
+            let spacer = NSStatusBar.system.statusItem(withLength: 0)
+            spacer.autosaveName = autosaveName
+            // An item whose button is never touched gets a zero-width slot.
+            spacer.button?.title = ""
+            spacer.button?.appearsDisabled = true
+            spacers.append(spacer)
+        }
+        for (spacer, length) in zip(spacers, lengths) where spacer.length != length {
+            spacer.length = length
         }
     }
 
