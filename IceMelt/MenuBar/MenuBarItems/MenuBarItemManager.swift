@@ -2393,9 +2393,10 @@ extension MenuBarItemManager {
         if let chevron, !(itemHasSlot && targetHasSlot) {
             if
                 itemHasSlot,
+                itemCache.address(for: item.tag)?.section == .visible,
+                itemCache.address(for: destination.targetItem.tag)?.section != .visible,
                 let current = items.first(matching: item.tag),
-                let divider = items.first(matching: .hiddenControlItem), divider.isOnScreen,
-                current.bounds.minX > divider.bounds.minX
+                let divider = items.first(matching: .hiddenControlItem), divider.hasSlot
             {
                 logger.debug("Dropping \(item.logString, privacy: .public) left of the hidden divider first")
                 MouseHelpers.hideCursor()
@@ -2426,8 +2427,8 @@ extension MenuBarItemManager {
             guard !Task.isCancelled else {
                 throw EventError.cannotComplete
             }
-            let (current, target) = try await waitForHostedItemsOnBar(item, destination.targetItem)
-            if hostedItemHasCorrectPosition(current, for: destination, target: target) {
+            let (current, target, before) = try await waitForHostedItemsOnBar(item, destination.targetItem)
+            if hostedItemHasCorrectPosition(current, for: destination, target: target, among: before) {
                 logger.debug("Item has correct position, finished with move")
                 return
             }
@@ -2438,8 +2439,8 @@ extension MenuBarItemManager {
                 }
                 try await postHostedDragEvents(item: item, from: current.bounds.center, to: hostedDropPoint(for: destination, target: target))
                 await eventSleep(for: .milliseconds(400))
-                let (after, targetAfter) = try await waitForHostedItemsOnBar(item, destination.targetItem)
-                if hostedItemHasCorrectPosition(after, for: destination, target: targetAfter) {
+                let (after, targetAfter, all) = try await waitForHostedItemsOnBar(item, destination.targetItem)
+                if hostedItemHasCorrectPosition(after, for: destination, target: targetAfter, among: all) {
                     logger.debug("Attempt \(n, privacy: .public) succeeded, finished with move")
                     return
                 }
@@ -2459,7 +2460,7 @@ extension MenuBarItemManager {
     /// slots, or throws when one is still in the overflow after
     /// ``hostedShowTimeout``.
     @available(macOS 27.0, *)
-    private func waitForHostedItemsOnBar(_ item: MenuBarItem, _ target: MenuBarItem) async throws -> (MenuBarItem, MenuBarItem) {
+    private func waitForHostedItemsOnBar(_ item: MenuBarItem, _ target: MenuBarItem) async throws -> (MenuBarItem, MenuBarItem, [MenuBarItem]) {
         let deadline = ContinuousClock.now + Self.hostedShowTimeout
         var missing = item
         var previousCount: Int?
@@ -2468,7 +2469,7 @@ extension MenuBarItemManager {
             let current = items.first(matching: item.tag)
             let currentTarget = items.first(matching: target.tag)
             if let current, current.hasSlot, let currentTarget, currentTarget.hasSlot {
-                return (current, currentTarget)
+                return (current, currentTarget, items)
             }
             missing = current?.hasSlot == true ? target : item
             // Once the bar has stopped changing, waiting longer won't help: on
@@ -2484,13 +2485,28 @@ extension MenuBarItemManager {
         throw EventError.hostedItemNotOnBar(missing)
     }
 
-    /// Returns whether the item sits where the destination says.
-    private func hostedItemHasCorrectPosition(_ item: MenuBarItem, for destination: MoveDestination, target: MenuBarItem) -> Bool {
-        switch destination {
-        case .leftOfItem:
-            item.bounds.maxX <= target.bounds.minX && target.bounds.minX - item.bounds.maxX < 1
-        case .rightOfItem:
-            item.bounds.minX >= target.bounds.maxX && item.bounds.minX - target.bounds.maxX < 1
+    /// Returns whether the item sits where the destination says: on the
+    /// right side of the target, with nothing else's slot between them.
+    /// Slots beside a system item have a gap, so adjacency is judged by
+    /// order, not by touching frames.
+    private func hostedItemHasCorrectPosition(
+        _ item: MenuBarItem,
+        for destination: MoveDestination,
+        target: MenuBarItem,
+        among items: [MenuBarItem]
+    ) -> Bool {
+        let (leading, trailing) = switch destination {
+        case .leftOfItem: (item, target)
+        case .rightOfItem: (target, item)
+        }
+        guard leading.bounds.maxX <= trailing.bounds.minX + 1 else {
+            return false
+        }
+        return !items.contains { other in
+            other.hasSlot &&
+            other.tag != item.tag && other.tag != target.tag &&
+            !other.isControlItem && !other.tag.isHostedSpacer &&
+            other.bounds.midX > leading.bounds.midX && other.bounds.midX < trailing.bounds.midX
         }
     }
 
