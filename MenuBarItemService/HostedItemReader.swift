@@ -52,11 +52,12 @@ enum HostedItemReader {
                     let frame = AXHelpers.frame(for: slot),
                     frame.width > 0,
                     let content = AXHelpers.children(for: slot).first,
-                    let sourcePID = AXHelpers.pid(for: content),
-                    sourcePID > 0 // The overflow chevron has no process behind it.
+                    let sourcePID = AXHelpers.pid(for: content)
                 else {
                     continue
                 }
+                // The overflow chevron has no process behind it. It is kept,
+                // with a source pid of 0, so the app knows where it is.
                 let isSystemExtra = sourcePID == agentPID
                 var identifier: String?
                 if isSystemExtra {

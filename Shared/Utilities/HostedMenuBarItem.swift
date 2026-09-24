@@ -25,8 +25,15 @@ struct HostedMenuBarItem: Codable, Hashable {
 
     /// The identifier of the process that created the item.
     ///
-    /// For the system menu extras this is the `MenuBarAgent` process.
+    /// For the system menu extras this is the `MenuBarAgent` process. The
+    /// overflow chevron has no process behind it and reports 0.
     let sourcePID: pid_t
+
+    /// A Boolean value that indicates whether the item is the chevron
+    /// that opens the system overflow.
+    var isOverflowChevron: Bool {
+        sourcePID == 0
+    }
 
     /// A Boolean value that indicates whether the item is a system menu
     /// extra hosted by `MenuBarAgent` itself.

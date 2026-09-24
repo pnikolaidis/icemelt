@@ -2024,8 +2024,13 @@ extension MenuBarItemManager {
     /// items.
     private final class HostedShownSectionContext {
         /// The sections that were shown: the item's own, and the hidden
-        /// section too when the item is always-hidden.
+        /// section too when the item is always-hidden. Empty when the
+        /// system overflow was expanded instead.
         let sections: [MenuBarSection.Name]
+
+        /// The clicked item, whose being on screen says whether the
+        /// overflow is still expanded.
+        let tag: MenuBarItemTag
 
         /// The window of the clicked item's shown interface.
         var shownInterfaceWindow: WindowInfo?
@@ -2033,8 +2038,9 @@ extension MenuBarItemManager {
         /// When the section was shown.
         let shownAt = ContinuousClock.now
 
-        init(sections: [MenuBarSection.Name]) {
+        init(sections: [MenuBarSection.Name], tag: MenuBarItemTag) {
             self.sections = sections
+            self.tag = tag
         }
     }
 
@@ -2070,6 +2076,17 @@ extension MenuBarItemManager {
             """
         )
 
+        try await postHostedClick(at: current.bounds.center, with: mouseButton, for: item)
+    }
+
+    /// Posts a click at the given point on the menu bar to the HID system,
+    /// as if the user had clicked there.
+    @available(macOS 27.0, *)
+    private func postHostedClick(at clickPoint: CGPoint, with mouseButton: CGMouseButton, for item: MenuBarItem) async throws {
+        guard let appState else {
+            throw EventError.cannotComplete
+        }
+
         appState.hidEventManager.stopAll()
         defer {
             appState.hidEventManager.startAll()
@@ -2080,7 +2097,6 @@ extension MenuBarItemManager {
             eventSemaphore.signal()
         }
 
-        let clickPoint = current.bounds.center
         let mouseLocation = try getMouseLocation()
         let source = try getEventSource()
         let clickTypes = getClickSubtypes(for: mouseButton)
@@ -2139,6 +2155,41 @@ extension MenuBarItemManager {
         let menuBarManager = appState.menuBarManager
         let sectionName = itemCache.address(for: item.tag)?.section ?? .hidden
 
+        // An item in the system overflow is reached by expanding the
+        // overflow, which lays its items out at the leading end of the
+        // bar, rather than by showing the section: a display too narrow to
+        // show the section still shows the overflow, and nothing of ours
+        // toggles.
+        let displayID = Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
+        if let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID] {
+            logger.debug("Expanding the overflow for \(item.logString, privacy: .public)")
+            let context = HostedShownSectionContext(sections: [], tag: item.tag)
+            hostedShownSectionContexts.append(context)
+            rehideTimer?.invalidate()
+            defer {
+                runRehideTimer()
+            }
+            do {
+                try await postHostedClick(at: chevron.center, with: .left, for: item)
+            } catch {
+                logger.error("Error expanding the overflow: \(error, privacy: .public)")
+                return
+            }
+            await waitForHostedItemOnBar(item)
+            let idsBeforeClick = Set(Bridging.getWindowList(option: .onScreen))
+            do {
+                try await clickHosted(item: item, with: mouseButton)
+            } catch {
+                logger.error("Error clicking item: \(error, privacy: .public)")
+                return
+            }
+            await eventSleep(for: .milliseconds(250))
+            context.shownInterfaceWindow = WindowInfo.createWindows(option: .onScreen).first { window in
+                window.ownerPID == item.sourcePID && !idsBeforeClick.contains(window.windowID)
+            }
+            return
+        }
+
         var shownSections = [MenuBarSection.Name]()
         for section in menuBarManager.sections where section.isHidden && section.controlItem.isAddedToMenuBar {
             switch (sectionName, section.name) {
@@ -2151,22 +2202,14 @@ extension MenuBarItemManager {
         }
         if !shownSections.isEmpty {
             logger.debug("Temporarily showing \(shownSections, privacy: .public) for \(item.logString, privacy: .public)")
-            let context = HostedShownSectionContext(sections: shownSections)
+            let context = HostedShownSectionContext(sections: shownSections, tag: item.tag)
             hostedShownSectionContexts.append(context)
             rehideTimer?.invalidate()
             defer {
                 runRehideTimer()
             }
 
-            // Wait for the agent to lay the section out.
-            let deadline = ContinuousClock.now + Self.hostedShowTimeout
-            repeat {
-                await eventSleep(for: .milliseconds(150))
-                let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
-                if items.first(matching: item.tag)?.isOnScreen == true {
-                    break
-                }
-            } while ContinuousClock.now < deadline
+            await waitForHostedItemOnBar(item)
 
             let idsBeforeClick = Set(Bridging.getWindowList(option: .onScreen))
             do {
@@ -2188,6 +2231,20 @@ extension MenuBarItemManager {
         } catch {
             logger.error("Error clicking item: \(error, privacy: .public)")
         }
+    }
+
+    /// Waits for the agent to lay the item out on the bar, up to
+    /// ``hostedShowTimeout``.
+    @available(macOS 27.0, *)
+    private func waitForHostedItemOnBar(_ item: MenuBarItem) async {
+        let deadline = ContinuousClock.now + Self.hostedShowTimeout
+        repeat {
+            await eventSleep(for: .milliseconds(150))
+            let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+            if items.first(matching: item.tag)?.isOnScreen == true {
+                return
+            }
+        } while ContinuousClock.now < deadline
     }
 
     /// Hides the sections shown by ``temporarilyShowHosted(item:clickingWith:)``,
@@ -2218,6 +2275,33 @@ extension MenuBarItemManager {
         for section in Set(contexts.flatMap(\.sections)) {
             appState.menuBarManager.section(withName: section)?.hide()
         }
+        if let context = contexts.first(where: { $0.sections.isEmpty }) {
+            Task {
+                await collapseHostedOverflow(after: context)
+            }
+        }
+    }
+
+    /// Collapses the system overflow if it is still expanded after a click
+    /// on one of its items. Expanded, the clicked item is laid out on the
+    /// bar; collapsed, it is stacked with the rest of the overflow.
+    @available(macOS 27.0, *)
+    private func collapseHostedOverflow(after context: HostedShownSectionContext) async {
+        let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+        guard
+            let item = items.first(matching: context.tag),
+            item.isOnScreen,
+            let chevron = MenuBarItem.hostedOverflowChevronFrames[Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()]
+        else {
+            return
+        }
+        logger.debug("Collapsing the overflow")
+        do {
+            try await postHostedClick(at: chevron.center, with: .left, for: item)
+        } catch {
+            logger.error("Error collapsing the overflow: \(error, privacy: .public)")
+        }
+        await cacheItemsRegardless()
     }
 }
 

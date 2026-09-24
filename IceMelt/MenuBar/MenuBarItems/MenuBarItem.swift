@@ -57,6 +57,13 @@ struct MenuBarItem: CustomStringConvertible {
         tag.isSystemClone
     }
 
+    /// The frame of the system overflow's chevron on each display, as of
+    /// the most recent read of the agent's tree (macOS 27). Absent when the
+    /// display has no overflow. Clicking the chevron expands the overflow,
+    /// laying its items out at the leading end of the bar; clicking it again
+    /// collapses it.
+    @MainActor private(set) static var hostedOverflowChevronFrames = [CGDirectDisplayID: CGRect]()
+
     /// The bit set in the window identifier of a hosted item.
     ///
     /// Hosted items have no window of their own, so they are given a
@@ -321,6 +328,16 @@ extension MenuBarItem {
             return [:]
         }
 
+        var chevronFrames = [CGDirectDisplayID: CGRect]()
+        for item in hosted where item.isOverflowChevron {
+            for screen in NSScreen.screens where CGDisplayBounds(screen.displayID).intersects(item.hostFrame) {
+                chevronFrames[screen.displayID] = item.frame
+            }
+        }
+        await MainActor.run {
+            hostedOverflowChevronFrames = chevronFrames
+        }
+
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let agentPID = hosted.first { $0.isSystemExtra }?.sourcePID
             ?? NSRunningApplication
@@ -351,7 +368,7 @@ extension MenuBarItem {
             let displayBounds = CGDisplayBounds(displayID)
             var seen = Set<HostedMenuBarItem>()
             let onDisplay = hosted
-                .filter { displayBounds.intersects($0.hostFrame) }
+                .filter { displayBounds.intersects($0.hostFrame) && !$0.isOverflowChevron }
                 // The agent can list an item twice with the same frame while it
                 // is in the overflow. Keep the first.
                 .filter { seen.insert($0).inserted }

@@ -545,7 +545,15 @@ extension HIDEventManager {
             // each is widened by it; otherwise the gaps between neighbours
             // read as empty space.
             let items = appState.itemManager.itemCache.managedItems
-            return items.contains { $0.isOnScreen && $0.bounds.insetBy(dx: -8, dy: 0).contains(mouseLocation) }
+            if items.contains(where: { $0.isOnScreen && $0.bounds.insetBy(dx: -8, dy: 0).contains(mouseLocation) }) {
+                return true
+            }
+            // The overflow chevron is the system's, not an item of ours, but
+            // clicking or hovering it is not "empty space" either.
+            if let chevron = MenuBarItem.hostedOverflowChevronFrames[screen.displayID] {
+                return chevron.insetBy(dx: -8, dy: 0).contains(mouseLocation)
+            }
+            return false
         }
         let windowIDs = Bridging.getMenuBarWindowList(option: [.onScreen, .activeSpace, .itemsOnly])
         return windowIDs.contains { windowID in
