@@ -537,6 +537,13 @@ extension HIDEventManager {
         guard let mouseLocation = MouseHelpers.locationCoreGraphics else {
             return false
         }
+        if #available(macOS 27.0, *) {
+            // Hosted items have no windows; their bounds come from the item
+            // cache. The hidden divider is not cached, so its blank span
+            // counts as empty space, as the room left of the items did before.
+            let items = appState.itemManager.itemCache.managedItems
+            return items.contains { $0.isOnScreen && $0.bounds.contains(mouseLocation) }
+        }
         let windowIDs = Bridging.getMenuBarWindowList(option: [.onScreen, .activeSpace, .itemsOnly])
         return windowIDs.contains { windowID in
             guard let bounds = Bridging.getWindowBounds(for: windowID) else {
