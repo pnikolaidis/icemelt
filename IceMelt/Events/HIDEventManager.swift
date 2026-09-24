@@ -541,8 +541,11 @@ extension HIDEventManager {
             // Hosted items have no windows; their bounds come from the item
             // cache. The hidden divider is not cached, so its blank span
             // counts as empty space, as the room left of the items did before.
+            // The slots don't include the agent's spacing between items, so
+            // each is widened by it; otherwise the gaps between neighbours
+            // read as empty space.
             let items = appState.itemManager.itemCache.managedItems
-            return items.contains { $0.isOnScreen && $0.bounds.contains(mouseLocation) }
+            return items.contains { $0.isOnScreen && $0.bounds.insetBy(dx: -8, dy: 0).contains(mouseLocation) }
         }
         let windowIDs = Bridging.getMenuBarWindowList(option: [.onScreen, .activeSpace, .itemsOnly])
         return windowIDs.contains { windowID in
