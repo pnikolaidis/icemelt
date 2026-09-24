@@ -186,7 +186,12 @@ final class LayoutBarContainer: NSView {
         }
         var newViews = [LayoutBarItemView]()
         for item in items {
-            if let existingView = arrangedViews.first(where: { $0.item == item }) {
+            // A hosted item's bounds change whenever its section shows or
+            // hides (macOS 27), so it is matched by identity, or the row
+            // would be rebuilt on every toggle.
+            if let existingView = arrangedViews.first(where: {
+                $0.item == item || (item.isHosted && $0.item.tag == item.tag && $0.item.windowID == item.windowID)
+            }) {
                 newViews.append(existingView)
             } else {
                 let view = LayoutBarItemView(appState: appState, item: item)
