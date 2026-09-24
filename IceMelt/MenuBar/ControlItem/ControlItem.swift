@@ -278,14 +278,21 @@ final class ControlItem {
     /// yet still consumes room, wiping out the application menu, whereas an
     /// item under the cap that doesn't fit simply overflows, taking the
     /// section with it. Filling the widest display's room therefore hides the
-    /// section on every display at once. Until a measurement exists, the
-    /// divider takes the most it can; the first cache corrects it.
+    /// section on every display at once.
+    ///
+    /// Until a measurement exists the divider stays collapsed, so the
+    /// section shows for a moment at launch. Taking the most it can instead
+    /// overflows the divider itself, and then which items the agent happens
+    /// to pack off the bar decides the first cache's sections, and with them
+    /// every later measurement (a visible item counted as hidden stays
+    /// hidden). Collapsed, the divider's place among the items is on the
+    /// bar for the first cache to read.
     private var hostedHidingLengths: [CGFloat] {
         let padding = Lengths.hostedPadding
         let screenWidth = NSScreen.screens.map(\.frame.width).min() ?? 1_000
         let cap = (screenWidth / 2).rounded(.down) - padding
         guard let width = hostedHidingWidth else {
-            return [cap]
+            return [0]
         }
         // Each item occupies its length plus the agent's padding.
         let slot = cap + padding
