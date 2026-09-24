@@ -2066,7 +2066,7 @@ extension MenuBarItemManager {
         try await waitForUserToPauseInput()
 
         let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
-        guard let current = items.first(matching: item.tag), current.isOnScreen else {
+        guard let current = items.first(matching: item.tag), current.hasSlot else {
             throw EventError.hostedItemNotOnBar(item)
         }
 
@@ -2099,6 +2099,13 @@ extension MenuBarItemManager {
             eventSemaphore.signal()
         }
 
+        try await postHostedClickUnguarded(at: clickPoint, with: mouseButton, for: item)
+    }
+
+    /// Posts a click without taking the event semaphore, for a caller that
+    /// already holds it.
+    @available(macOS 27.0, *)
+    private func postHostedClickUnguarded(at clickPoint: CGPoint, with mouseButton: CGMouseButton, for item: MenuBarItem) async throws {
         let mouseLocation = try getMouseLocation()
         let source = try getEventSource()
         let clickTypes = getClickSubtypes(for: mouseButton)
@@ -2243,7 +2250,7 @@ extension MenuBarItemManager {
         repeat {
             await eventSleep(for: .milliseconds(150))
             let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
-            if items.first(matching: item.tag)?.isOnScreen == true {
+            if items.first(matching: item.tag)?.hasSlot == true {
                 return
             }
         } while ContinuousClock.now < deadline
@@ -2292,7 +2299,7 @@ extension MenuBarItemManager {
         let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
         guard
             let item = items.first(matching: context.tag),
-            item.isOnScreen,
+            item.hasSlot, !item.isOnScreen,
             let chevron = MenuBarItem.hostedOverflowChevronFrames[Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()]
         else {
             return
@@ -2339,22 +2346,35 @@ extension MenuBarItemManager {
             """
         )
 
-        // Show the sections, remembering what to restore.
-        let dividers = appState.menuBarManager.sections
-            .filter { $0.name != .visible && $0.controlItem.isAddedToMenuBar }
-            .map(\.controlItem)
-        let savedStates = dividers.map { ($0, $0.state) }
-        for divider in dividers where divider.state != .showSection {
-            divider.state = .showSection
-        }
         defer {
-            for (divider, state) in savedStates where divider.state != state {
-                divider.state = state
-            }
             lastMoveOperationTimestamp = .now
             Task {
                 try? await Task.sleep(for: .seconds(1))
                 await self.cacheItemsRegardless()
+            }
+        }
+
+        // Reach the items. One in the system overflow has no slot to drag
+        // from or to. Expanding the overflow gives every overflowed item a
+        // slot at the leading end of the bar, on any display, and a drag
+        // among those slots works; a drag between them and the bar proper
+        // does not (measured 2026-09-24). So a visible item is moved into
+        // the hidden section by dropping it just left of the hidden
+        // divider, on the bar proper, before anything else. Without a
+        // chevron, every section is shown instead, and restored after.
+        var items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+        let displayID = Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
+        let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID]
+        var expandedOverflow = false
+        var savedStates = [(ControlItem, ControlItem.HidingState)]()
+        defer {
+            for (divider, state) in savedStates where divider.state != state {
+                divider.state = state
+            }
+            if expandedOverflow {
+                Task {
+                    await self.collapseHostedOverflow(after: HostedShownSectionContext(sections: [], tag: item.tag))
+                }
             }
         }
 
@@ -2366,6 +2386,39 @@ extension MenuBarItemManager {
         let mouseLocation = try getMouseLocation()
         defer {
             MouseHelpers.warpCursor(to: mouseLocation)
+        }
+
+        let itemHasSlot = items.first(matching: item.tag)?.hasSlot == true
+        let targetHasSlot = items.first(matching: destination.targetItem.tag)?.hasSlot == true
+        if let chevron, !(itemHasSlot && targetHasSlot) {
+            if
+                itemHasSlot,
+                let current = items.first(matching: item.tag),
+                let divider = items.first(matching: .hiddenControlItem), divider.isOnScreen,
+                current.bounds.minX > divider.bounds.minX
+            {
+                logger.debug("Dropping \(item.logString, privacy: .public) left of the hidden divider first")
+                MouseHelpers.hideCursor()
+                try await postHostedDragEvents(
+                    item: item,
+                    from: current.bounds.center,
+                    to: CGPoint(x: divider.bounds.minX - 3, y: divider.bounds.midY)
+                )
+                MouseHelpers.showCursor()
+                await eventSleep(for: .milliseconds(400))
+                items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+            }
+            logger.debug("Expanding the overflow to move \(item.logString, privacy: .public)")
+            try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item)
+            expandedOverflow = true
+        } else if !(itemHasSlot && targetHasSlot) {
+            let dividers = appState.menuBarManager.sections
+                .filter { $0.name != .visible && $0.controlItem.isAddedToMenuBar }
+                .map(\.controlItem)
+            savedStates = dividers.map { ($0, $0.state) }
+            for divider in dividers where divider.state != .showSection {
+                divider.state = .showSection
+            }
         }
 
         let maxAttempts = 3
@@ -2414,14 +2467,14 @@ extension MenuBarItemManager {
             let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             let current = items.first(matching: item.tag)
             let currentTarget = items.first(matching: target.tag)
-            if let current, current.isOnScreen, let currentTarget, currentTarget.isOnScreen {
+            if let current, current.hasSlot, let currentTarget, currentTarget.hasSlot {
                 return (current, currentTarget)
             }
-            missing = current?.isOnScreen == true ? target : item
+            missing = current?.hasSlot == true ? target : item
             // Once the bar has stopped changing, waiting longer won't help: on
             // a display too narrow to show the section, the item never gets
             // a slot.
-            let count = items.filter(\.isOnScreen).count
+            let count = items.filter(\.hasSlot).count
             if let previousCount, previousCount == count {
                 break
             }

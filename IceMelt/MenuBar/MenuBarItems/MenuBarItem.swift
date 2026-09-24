@@ -28,6 +28,16 @@ struct MenuBarItem: CustomStringConvertible {
     /// A Boolean value that indicates whether the item is on screen.
     let isOnScreen: Bool
 
+    /// A Boolean value that indicates whether the item has a slot of its
+    /// own that can be clicked or dragged (macOS 27).
+    ///
+    /// An item on the bar has one. So does an item laid out at the leading
+    /// end while the system overflow is expanded, although it is not on
+    /// the bar proper (``isOnScreen`` is `false`). An item stacked in the
+    /// collapsed overflow has none. Always equals ``isOnScreen`` before
+    /// macOS 27.
+    let hasSlot: Bool
+
     /// A Boolean value that indicates whether this item can be moved.
     var isMovable: Bool {
         tag.isMovable
@@ -207,7 +217,7 @@ struct MenuBarItem: CustomStringConvertible {
     /// An item in the system overflow is not on screen. The agent still lists
     /// it, but at a stacked position that says nothing about where it sits.
     @available(macOS 27.0, *)
-    private init(hosted item: HostedMenuBarItem, tag: MenuBarItemTag, ownerPID: pid_t, isOnScreen: Bool) {
+    private init(hosted item: HostedMenuBarItem, tag: MenuBarItemTag, ownerPID: pid_t, isOnScreen: Bool, hasSlot: Bool) {
         self.tag = tag
         self.windowID = Self.hostedWindowIDFlag | (CGWindowID(truncatingIfNeeded: tag.hashValue) & (Self.hostedWindowIDFlag - 1))
         self.ownerPID = ownerPID
@@ -215,6 +225,7 @@ struct MenuBarItem: CustomStringConvertible {
         self.bounds = item.frame
         self.title = item.identifier
         self.isOnScreen = isOnScreen
+        self.hasSlot = hasSlot
     }
 
     /// Creates a menu bar item without checks.
@@ -229,6 +240,7 @@ struct MenuBarItem: CustomStringConvertible {
         self.bounds = itemWindow.bounds
         self.title = itemWindow.title
         self.isOnScreen = itemWindow.isOnScreen
+        self.hasSlot = itemWindow.isOnScreen
     }
 
     /// Creates a menu bar item without checks.
@@ -245,6 +257,7 @@ struct MenuBarItem: CustomStringConvertible {
         self.bounds = itemWindow.bounds
         self.title = itemWindow.title
         self.isOnScreen = itemWindow.isOnScreen
+        self.hasSlot = itemWindow.isOnScreen
     }
 }
 
@@ -384,8 +397,11 @@ extension MenuBarItem {
                 countsByMinX[Int(item.frame.minX), default: 0] += 1
             }
             let chevronMinX = chevronFrames[displayID]?.minX
+            func hasSlot(_ item: HostedMenuBarItem) -> Bool {
+                countsByMinX[Int(item.frame.minX)] == 1
+            }
             func isOnScreen(_ item: HostedMenuBarItem) -> Bool {
-                guard countsByMinX[Int(item.frame.minX)] == 1 else {
+                guard hasSlot(item) else {
                     return false
                 }
                 if let chevronMinX, item.sourcePID != ownPID {
@@ -435,7 +451,8 @@ extension MenuBarItem {
                     hosted: item,
                     tag: tag,
                     ownerPID: agentPID,
-                    isOnScreen: isOnScreen(item)
+                    isOnScreen: isOnScreen(item),
+                    hasSlot: hasSlot(item)
                 )
             }
         }
@@ -487,7 +504,8 @@ extension MenuBarItem: Equatable {
         lhs.sourcePID == rhs.sourcePID &&
         NSStringFromRect(lhs.bounds) == NSStringFromRect(rhs.bounds) &&
         lhs.title == rhs.title &&
-        lhs.isOnScreen == rhs.isOnScreen
+        lhs.isOnScreen == rhs.isOnScreen &&
+        lhs.hasSlot == rhs.hasSlot
     }
 }
 
@@ -501,6 +519,7 @@ extension MenuBarItem: Hashable {
         hasher.combine(NSStringFromRect(bounds))
         hasher.combine(title)
         hasher.combine(isOnScreen)
+        hasher.combine(hasSlot)
     }
 }
 

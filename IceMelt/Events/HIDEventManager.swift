@@ -550,8 +550,11 @@ extension HIDEventManager {
             }
             // The overflow chevron is the system's, not an item of ours, but
             // clicking or hovering it is not "empty space" either.
+            // The chevron shifts by some 40 pt as the overflow opens and
+            // closes, and its frame is read only as the items are cached,
+            // so the band around it is generous.
             if let chevron = MenuBarItem.hostedOverflowChevronFrames[screen.displayID] {
-                return chevron.insetBy(dx: -8, dy: 0).contains(mouseLocation)
+                return chevron.insetBy(dx: -48, dy: 0).contains(mouseLocation)
             }
             return false
         }
