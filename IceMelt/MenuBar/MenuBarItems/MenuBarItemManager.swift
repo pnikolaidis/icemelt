@@ -745,7 +745,7 @@ extension MenuBarItemManager {
             case .itemIsHosted(let item):
                 "IceMelt can't move \"\(item.displayName)\" on this version of macOS yet"
             case .hostedItemNotOnBar(let item):
-                "\"\(item.displayName)\" is not on the menu bar"
+                "\"\(item.displayName)\" is in the menu bar's overflow, where IceMelt can't reach it on this display"
             }
         }
 
@@ -755,6 +755,8 @@ extension MenuBarItemManager {
                 nil
             case .itemIsHosted:
                 "Items can be arranged with ⌘ Command + dragging them in the menu bar."
+            case .hostedItemNotOnBar:
+                "Click the « chevron to open the overflow, then ⌘ Command + drag the item there."
             default:
                 "Please try again. If the error persists, please file a bug report."
             }
@@ -2361,11 +2363,9 @@ extension MenuBarItemManager {
             eventSemaphore.signal()
         }
 
-        MouseHelpers.hideCursor()
         let mouseLocation = try getMouseLocation()
         defer {
             MouseHelpers.warpCursor(to: mouseLocation)
-            MouseHelpers.showCursor()
         }
 
         let maxAttempts = 3
@@ -2379,6 +2379,10 @@ extension MenuBarItemManager {
                 return
             }
             do {
+                MouseHelpers.hideCursor()
+                defer {
+                    MouseHelpers.showCursor()
+                }
                 try await postHostedDragEvents(item: item, from: current.bounds.center, to: hostedDropPoint(for: destination, target: target))
                 await eventSleep(for: .milliseconds(400))
                 let (after, targetAfter) = try await waitForHostedItemsOnBar(item, destination.targetItem)
@@ -2405,6 +2409,7 @@ extension MenuBarItemManager {
     private func waitForHostedItemsOnBar(_ item: MenuBarItem, _ target: MenuBarItem) async throws -> (MenuBarItem, MenuBarItem) {
         let deadline = ContinuousClock.now + Self.hostedShowTimeout
         var missing = item
+        var previousCount: Int?
         repeat {
             let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             let current = items.first(matching: item.tag)
@@ -2413,7 +2418,15 @@ extension MenuBarItemManager {
                 return (current, currentTarget)
             }
             missing = current?.isOnScreen == true ? target : item
-            await eventSleep(for: .milliseconds(150))
+            // Once the bar has stopped changing, waiting longer won't help: on
+            // a display too narrow to show the section, the item never gets
+            // a slot.
+            let count = items.filter(\.isOnScreen).count
+            if let previousCount, previousCount == count {
+                break
+            }
+            previousCount = count
+            await eventSleep(for: .milliseconds(400))
         } while ContinuousClock.now < deadline
         throw EventError.hostedItemNotOnBar(missing)
     }

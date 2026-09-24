@@ -375,10 +375,23 @@ extension MenuBarItem {
                 .sorted { $0.frame.minX < $1.frame.minX }
 
             // Items in the overflow are listed stacked at one position; items on
-            // the bar never share one.
+            // the bar never share one. An item alone at its stacked position,
+            // or laid out at the leading end while the overflow is expanded,
+            // is told apart by lying left of the chevron. Our own items are
+            // exempt: the divider's slot extends under the chevron.
             var countsByMinX = [Int: Int]()
             for item in onDisplay {
                 countsByMinX[Int(item.frame.minX), default: 0] += 1
+            }
+            let chevronMinX = chevronFrames[displayID]?.minX
+            func isOnScreen(_ item: HostedMenuBarItem) -> Bool {
+                guard countsByMinX[Int(item.frame.minX)] == 1 else {
+                    return false
+                }
+                if let chevronMinX, item.sourcePID != ownPID {
+                    return item.frame.minX >= chevronMinX
+                }
+                return true
             }
 
             var slotCounts = [MenuBarItemTag.Namespace: Int]()
@@ -422,7 +435,7 @@ extension MenuBarItem {
                     hosted: item,
                     tag: tag,
                     ownerPID: agentPID,
-                    isOnScreen: countsByMinX[Int(item.frame.minX)] == 1
+                    isOnScreen: isOnScreen(item)
                 )
             }
         }
