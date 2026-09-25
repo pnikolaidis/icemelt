@@ -422,18 +422,21 @@ extension MenuBarItem {
                 countsByMinX[Int(item.frame.minX), default: 0] += 1
             }
             // Stacked items don't all share one x exactly (1204, 1206, 1208…),
-            // so a unique x is not enough left of the chevron: the stack sits
-            // within a few dozen points of it, whereas the expanded overflow
-            // lays items out far to its left.
+            // so a unique x is not enough: stacked items overlap one another,
+            // whereas laid-out ones, on the bar or in the expanded overflow,
+            // never do.
             let chevronMinX = chevronFrames[displayID]?.minX
             func hasSlot(_ item: HostedMenuBarItem) -> Bool {
                 guard countsByMinX[Int(item.frame.minX)] == 1 else {
                     return false
                 }
-                if let chevronMinX, item.sourcePID != ownPID, item.frame.minX < chevronMinX {
-                    return item.frame.maxX < chevronMinX - 60
+                if item.sourcePID == ownPID {
+                    return true
                 }
-                return true
+                return !onDisplay.contains { other in
+                    other != item && other.sourcePID != ownPID && !other.isOverflowChevron &&
+                    other.frame.intersection(item.frame).width > 4
+                }
             }
             func isOnScreen(_ item: HostedMenuBarItem) -> Bool {
                 guard hasSlot(item) else {
