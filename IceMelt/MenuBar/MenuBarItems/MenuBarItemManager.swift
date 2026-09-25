@@ -399,6 +399,27 @@ extension MenuBarItemManager {
             context.cache.insert(item, at: destination)
         }
 
+        if #available(macOS 27.0, *) {
+            // The agent lists only some of the items in a collapsed overflow,
+            // so a hidden item can vanish from a read and be back in the next.
+            // One that was cached in a hidden section stays there, at its
+            // old place, while its process lives: dropping it would empty
+            // the Layout pane's row and refill it as the overflow toggles.
+            for section in [MenuBarSection.Name.hidden, .alwaysHidden] {
+                for (index, previous) in itemCache.managedItems(for: section).enumerated()
+                where context.cache.address(for: previous.tag) == nil {
+                    guard
+                        previous.isHosted,
+                        let pid = previous.sourcePID,
+                        NSRunningApplication(processIdentifier: pid) != nil
+                    else {
+                        continue
+                    }
+                    context.cache[section].insert(previous, at: min(index, context.cache[section].count))
+                }
+            }
+        }
+
         if context.shouldClearCachedItemWindowIDs {
             logger.info("Clearing cached menu bar item windowIDs")
             await cacheActor.clearCachedItemWindowIDs() // Ensure next cache isn't skipped.
@@ -2445,15 +2466,9 @@ extension MenuBarItemManager {
                 await eventSleep(for: .milliseconds(400))
                 items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             }
-            // The expanded overflow has room for about the area left of the
-            // notch, and a divider filling the bar is laid out in it too,
-            // taking that room from the items (six of sixteen got no slot
-            // on 2026-09-25). The dividers are collapsed for the duration.
-            savedStates = collapseDividers()
-            await eventSleep(for: .milliseconds(400))
-            // Collapsing the dividers (and the drop above) reflows the bar and
-            // moves the chevron, so its frame is read again; a click at the
-            // old frame lands on whatever item is there now.
+            // The drop above reflows the bar and moves the chevron, so its
+            // frame is read again; a click at the old frame lands on whatever
+            // item is there now.
             _ = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             if let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID] {
                 logger.debug(
@@ -2464,6 +2479,23 @@ extension MenuBarItemManager {
                 )
                 try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item, leavingPointer: true)
                 expandedOverflow = true
+            }
+            // The expanded overflow has room for about the area left of the
+            // notch, and a divider filling the bar is laid out in it too,
+            // taking that room from the items (six of sixteen got no slot
+            // on 2026-09-25). If either item got none, the dividers are
+            // collapsed for the duration and the overflow reopened, since
+            // the reflow closes it. That reflows the bar twice, so it is
+            // done only when needed.
+            if try await !hostedItemsHaveSlots(item, destination.targetItem, within: .seconds(1)) {
+                logger.debug("Collapsing the dividers to make room in the overflow")
+                savedStates = collapseDividers()
+                await eventSleep(for: .milliseconds(400))
+                _ = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+                if let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID] {
+                    try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item, leavingPointer: true)
+                    expandedOverflow = true
+                }
             }
         } else if !(itemHasSlot && targetHasSlot) {
             savedStates = collapseDividers()
@@ -2517,6 +2549,20 @@ extension MenuBarItemManager {
             divider.state = .showSection
         }
         return saved
+    }
+
+    /// Waits up to the given duration for both items to have slots.
+    @available(macOS 27.0, *)
+    private func hostedItemsHaveSlots(_ item: MenuBarItem, _ target: MenuBarItem, within duration: Duration) async throws -> Bool {
+        let deadline = ContinuousClock.now + duration
+        repeat {
+            let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+            if items.first(matching: item.tag)?.hasSlot == true, items.first(matching: target.tag)?.hasSlot == true {
+                return true
+            }
+            await eventSleep(for: .milliseconds(200))
+        } while ContinuousClock.now < deadline
+        return false
     }
 
     /// Waits until both items are on the bar and returns their current
