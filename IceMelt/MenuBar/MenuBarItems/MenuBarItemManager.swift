@@ -2059,7 +2059,7 @@ extension MenuBarItemManager {
     /// the system overflow has no slot of its own (see
     /// ``temporarilyShowHosted(item:clickingWith:)``).
     @available(macOS 27.0, *)
-    private func clickHosted(item: MenuBarItem, with mouseButton: CGMouseButton) async throws {
+    private func clickHosted(item: MenuBarItem, with mouseButton: CGMouseButton, leavingPointer: Bool = false) async throws {
         guard let appState else {
             throw EventError.cannotComplete
         }
@@ -2079,13 +2079,22 @@ extension MenuBarItemManager {
             """
         )
 
-        try await postHostedClick(at: current.bounds.center, with: mouseButton, for: item)
+        try await postHostedClick(at: current.bounds.center, with: mouseButton, for: item, leavingPointer: leavingPointer)
     }
 
     /// Posts a click at the given point on the menu bar to the HID system,
     /// as if the user had clicked there.
+    ///
+    /// The pointer is put back where it was afterwards unless `leavingPointer`
+    /// is set: the expanded overflow stays open only while the pointer is
+    /// over it, so a click that opens it must leave the pointer there.
     @available(macOS 27.0, *)
-    private func postHostedClick(at clickPoint: CGPoint, with mouseButton: CGMouseButton, for item: MenuBarItem) async throws {
+    private func postHostedClick(
+        at clickPoint: CGPoint,
+        with mouseButton: CGMouseButton,
+        for item: MenuBarItem,
+        leavingPointer: Bool = false
+    ) async throws {
         guard let appState else {
             throw EventError.cannotComplete
         }
@@ -2100,13 +2109,18 @@ extension MenuBarItemManager {
             eventSemaphore.signal()
         }
 
-        try await postHostedClickUnguarded(at: clickPoint, with: mouseButton, for: item)
+        try await postHostedClickUnguarded(at: clickPoint, with: mouseButton, for: item, leavingPointer: leavingPointer)
     }
 
     /// Posts a click without taking the event semaphore, for a caller that
     /// already holds it.
     @available(macOS 27.0, *)
-    private func postHostedClickUnguarded(at clickPoint: CGPoint, with mouseButton: CGMouseButton, for item: MenuBarItem) async throws {
+    private func postHostedClickUnguarded(
+        at clickPoint: CGPoint,
+        with mouseButton: CGMouseButton,
+        for item: MenuBarItem,
+        leavingPointer: Bool = false
+    ) async throws {
         let mouseLocation = try getMouseLocation()
         let source = try getEventSource()
         let clickTypes = getClickSubtypes(for: mouseButton)
@@ -2136,7 +2150,9 @@ extension MenuBarItemManager {
 
         MouseHelpers.hideCursor()
         defer {
-            MouseHelpers.warpCursor(to: mouseLocation)
+            if !leavingPointer {
+                MouseHelpers.warpCursor(to: mouseLocation)
+            }
             MouseHelpers.showCursor()
         }
 
@@ -2180,7 +2196,7 @@ extension MenuBarItemManager {
                 runRehideTimer()
             }
             do {
-                try await postHostedClick(at: chevron.center, with: .left, for: item)
+                try await postHostedClick(at: chevron.center, with: .left, for: item, leavingPointer: true)
             } catch {
                 logger.error("Error expanding the overflow: \(error, privacy: .public)")
                 return
@@ -2197,7 +2213,7 @@ extension MenuBarItemManager {
             }
             let idsBeforeClick = Set(Bridging.getWindowList(option: .onScreen))
             do {
-                try await clickHosted(item: item, with: mouseButton)
+                try await clickHosted(item: item, with: mouseButton, leavingPointer: true)
             } catch {
                 logger.error("Error clicking item: \(error, privacy: .public)")
                 return
@@ -2441,7 +2457,7 @@ extension MenuBarItemManager {
             _ = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             if let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID] {
                 logger.debug("Expanding the overflow to move \(item.logString, privacy: .public)")
-                try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item)
+                try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item, leavingPointer: true)
                 expandedOverflow = true
             }
         } else if !(itemHasSlot && targetHasSlot) {
