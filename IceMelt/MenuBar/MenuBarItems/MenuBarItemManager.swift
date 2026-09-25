@@ -2434,10 +2434,16 @@ extension MenuBarItemManager {
             // taking that room from the items (six of sixteen got no slot
             // on 2026-09-25). The dividers are collapsed for the duration.
             savedStates = collapseDividers()
-            await eventSleep(for: .milliseconds(300))
-            logger.debug("Expanding the overflow to move \(item.logString, privacy: .public)")
-            try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item)
-            expandedOverflow = true
+            await eventSleep(for: .milliseconds(400))
+            // Collapsing the dividers (and the drop above) reflows the bar and
+            // moves the chevron, so its frame is read again; a click at the
+            // old frame lands on whatever item is there now.
+            _ = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+            if let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID] {
+                logger.debug("Expanding the overflow to move \(item.logString, privacy: .public)")
+                try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item)
+                expandedOverflow = true
+            }
         } else if !(itemHasSlot && targetHasSlot) {
             savedStates = collapseDividers()
         }
