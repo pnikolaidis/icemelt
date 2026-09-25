@@ -1,6 +1,6 @@
 # IceMelt Project Status
 
-Snapshot for resuming work. Last updated 2026-08-02.
+Snapshot for resuming work. Last updated 2026-09-25 (macOS 27 section); the rest 2026-08-02.
 
 ## Where things stand
 
@@ -59,6 +59,94 @@ Snapshot for resuming work. Last updated 2026-08-02.
   Homebrew cask staged in `packaging/homebrew-tap/` (see `PUBLISHING.md` there); the
   GitHub Support request text is a comment on issue #19; the human verification
   checklist is `docs/verify-runs/pending-human-checklist.md`.
+
+## macOS 27 (MenuBarAgent) — resume point, 2026-09-25
+
+**Read this first if you are resuming the macOS 27 work.** Everything below is on
+branch `macos-27-recreate-spacers`, open as **PR #49**, stacked on `macos-27-hosted-menu-bar`
+(PR #46, base `melt`). Neither is merged. The build at the tip of #49 is installed in
+`/Applications` on Peter's laptop. Tracking issues: #40 (user bug, fixed by #46+#49),
+#47 (hiding / drag-and-drop), #48 (IceMelt Bar clicks). Each issue carries dated
+comments with the measurements; the commit messages carry the reasoning per change.
+
+### What macOS 27 changed, in one paragraph
+
+Status items are no longer windows. Each display's bar is one window owned by
+`MenuBarAgent`; items are slots in its accessibility tree (`MenuBarItemService/
+HostedItemReader.swift` reads it, `MenuBarItem.getHostedMenuBarItemsByDisplay`
+interprets it). The only way to hide an item is the system overflow (the `«` chevron):
+whatever doesn't fit between the app menu and the trailing items overflows, leading
+items first. IceMelt hides a section by sizing its divider (plus blank "spacer" status
+items, since one item may be at most half a display wide) to exactly the room. Moving
+or clicking an item means posting real events to the HID system at the slot's frame.
+
+### What works on the built-in display (verified by hand and by log)
+
+- Hiding: divider sized to the measured room within ~1 s of launch, stable across
+  relaunches, app menus intact. Room is measured to the first item of the *visible*
+  section as the previous cache recorded it (not to the divider), on every display,
+  widest wins; each item capped at half the *narrowest* display.
+- Show-on-hover / show-on-click no longer fire over items, the gaps between them, or
+  the chevron.
+- Layout pane rows hold still across section toggles and during a move; hidden items
+  stay listed while their app runs (the agent lists only some overflowed items).
+- **Layout drag-and-drop between hidden items works** (Claude→SentinelAgent, Granola,
+  2026-09-25), via the expanded overflow. Rules measured: click the chevron → overflowed
+  items are laid out at the leading end with real frames, *only while the pointer stays
+  over the overflow*; ⌘-drag among those slots reorders, drop at target.minX+3 lands
+  left of it, target.maxX-3 right of it; overflow → bar proper works; bar proper →
+  overflow does nothing (a visible item is moved into the hidden section by dropping it
+  just left of the divider first); the expanded overflow has room for about the area
+  left of the notch and IceMelt's own divider is laid out in it too, so the dividers are
+  collapsed for the duration when an item gets no slot.
+- Success of a move is judged by *order* (nothing else's slot between item and target),
+  not by touching frames — slots beside system items have gaps.
+
+### Known limits and open items
+
+- **Not tested on two displays.** The 4K was disconnected the whole time. Spacer
+  placement (verdict-driven bisection of `NSStatusItem Preferred Position`,
+  `ControlItem.reconcileSpacers`) has never run for real. Preferred positions map into
+  an ordering of the agent's own, not geometry; the band beside an *expanded* divider is
+  tens of units wide.
+- **Flicker during a move**: the overflow visibly opens, and when the dividers must be
+  collapsed the bar reflows twice. Inherent to the approach; reduced, not gone.
+- Dragging next to a *system* item (Focus, battery) is unverified.
+- IceMelt Bar / search clicks on hidden items take the same overflow route; the click
+  inside the overflow and the collapse afterwards are implemented but **unverified by
+  hand**. Thumbnails are app icons / SF Symbols, not live images.
+- On a narrow display where the divider itself overflows, `ControlItemPair` fails
+  ("Missing control item for hidden section") and the cache keeps its previous value;
+  the Layout pane can sit on its spinner if that display is active at launch.
+- The agent has been seen holding **two windows for one display** (same frame, layouts
+  a few points apart). The reader keys items by window index and the app picks the one
+  where its own divider matches AppKit's window frame. Cause unknown (appeared after a
+  display disconnect?).
+- Cold start: the divider must start collapsed (`hostedHidingLengths` returns `[0]`
+  until measured) or the first cache reads the sections from whatever the agent packed
+  off the bar.
+- `Bridging.isWindowOnScreen(item.windowID)` in the IceMelt Bar / search click handlers
+  is always false for hosted items (synthetic window ID), which is fine — the hosted
+  path decides for itself — but reads oddly.
+
+### Tooling that made this tractable (rebuild in a scratch dir, ~40 lines each)
+
+`axdump` (walk `MenuBarAgent`'s AX windows → slots → child pid, print x/width/name),
+`click x y` / `drag x1 y1 x2 y2` (⌘ held) / `move x y` posting `CGEvent`s to
+`.cghidEventTap`, and `/usr/bin/log stream --process IceMelt --level debug` filtered to
+the `MenuBarItemManager` category — `waitForHostedItemsOnBar` logs each read. Peter's
+screen recordings, split with `ffmpeg -vf fps=1`, were the fastest way to see what a
+drag did. Synthetic clicks on the bar trigger IceMelt's own show-on-click unless the
+chevron band excludes them, and every experiment reflows the real bar: reverse each one.
+
+### Next steps, in order
+
+1. Retest on the 4K + laptop pair: does the multi-item fill converge, do the spacers
+   land (watch `Spacer … landed … trying …` in the log), does hiding hold on both?
+2. Hand-test an IceMelt Bar click on a hidden item, and a drag next to a system item.
+3. Review and merge #46 then #49 into `melt`; bump to `2026.2.0`, CHANGELOG, release
+   per the recipe (notarize + appcast). #40 closes with the release.
+4. Then the cleanups above (spinner on the narrow display, thumbnails).
 
 ## Outstanding
 
