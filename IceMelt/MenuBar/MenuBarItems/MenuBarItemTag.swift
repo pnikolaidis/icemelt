@@ -67,6 +67,37 @@ struct MenuBarItemTag: Hashable, CustomStringConvertible {
     private init(controlItem identifier: ControlItem.Identifier) {
         self.init(namespace: .iceMelt, title: identifier.rawValue)
     }
+
+    /// The suffix that separates a divider's identifier from a spacer's
+    /// index in the title of a spacer tag (macOS 27).
+    private static let hostedSpacerSeparator = ".Spacer"
+
+    /// Creates a tag for the spacer at the given index beside the divider
+    /// with the given identifier (macOS 27).
+    ///
+    /// The title doubles as the spacer's `NSStatusItem` autosave name.
+    init(hostedSpacerFor identifier: ControlItem.Identifier, index: Int) {
+        self.init(namespace: .iceMelt, title: "\(identifier.rawValue)\(Self.hostedSpacerSeparator)\(index)")
+    }
+
+    /// The identifier of the divider that the item identified by this tag
+    /// is a spacer for, or `nil` if the item is not a spacer (macOS 27).
+    var hostedSpacerOwner: ControlItem.Identifier? {
+        guard
+            namespace == .iceMelt,
+            let range = title.range(of: Self.hostedSpacerSeparator)
+        else {
+            return nil
+        }
+        return ControlItem.Identifier(rawValue: String(title[..<range.lowerBound]))
+    }
+
+    /// A Boolean value that indicates whether the item identified by this
+    /// tag is one of the blank spacers a divider hides its section with
+    /// (macOS 27).
+    var isHostedSpacer: Bool {
+        hostedSpacerOwner != nil
+    }
 }
 
 // MARK: MenuBarItemTag Constants

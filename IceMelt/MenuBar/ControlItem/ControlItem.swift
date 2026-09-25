@@ -5,6 +5,7 @@
 
 import Cocoa
 import Combine
+import OSLog
 
 // MARK: - ControlItem
 
@@ -59,6 +60,42 @@ final class ControlItem {
     /// ``MenuBarItem/getMenuBarItems(on:option:)``).
     private(set) static var hostedFrames = [Identifier: CGRect]()
 
+    /// The spacers currently in the menu bar, across all dividers, keyed by
+    /// their tags (macOS 27). See ``hostedSpacerFrames``.
+    private static var liveSpacers = [MenuBarItemTag: NSStatusItem]()
+
+    /// The frames of the spacers currently in the menu bar, in screen
+    /// coordinates, keyed by their tags (macOS 27).
+    ///
+    /// Read like ``hostedFrames``, so the item manager can tell where the
+    /// spacers landed relative to the sections (see
+    /// `MenuBarItemManager.hostedSpacerPlacements`).
+    static var hostedSpacerFrames: [MenuBarItemTag: CGRect] {
+        liveSpacers.reduce(into: [:]) { result, entry in
+            guard
+                let window = entry.value.button?.window,
+                let frame = screenFrame(for: window.frame)
+            else {
+                return
+            }
+            result[entry.key] = frame
+        }
+    }
+
+    /// Converts a status window frame from AppKit's flipped coordinates to
+    /// screen coordinates.
+    private static func screenFrame(for frame: CGRect) -> CGRect? {
+        guard let primaryScreen = NSScreen.screens.first else {
+            return nil
+        }
+        return CGRect(
+            x: frame.minX,
+            y: primaryScreen.frame.height - frame.maxY,
+            width: frame.width,
+            height: frame.height
+        )
+    }
+
     /// A hiding state for a control item.
     enum HidingState {
         case showSection
@@ -77,6 +114,18 @@ final class ControlItem {
 
         /// The padding macOS 27 adds around a status item's length.
         static let hostedPadding: CGFloat = 16
+
+        /// The most items a divider may use to hide its section on macOS 27,
+        /// itself included. Each item is kept under the cap of the narrowest
+        /// display, so a wide display beside a laptop needs several; eight
+        /// covers the widest display Apple sells beside a 13" laptop. The
+        /// bound keeps a bad measurement from filling the menu bar with blank
+        /// items.
+        static let maxHidingItems = 8
+
+        /// The most times a spacer is re-created in search of its place beside
+        /// the divider before the search is given up until the next hide.
+        static let maxSpacerPlacementAttempts = 8
     }
 
     /// Storage for a control item's underlying status item.
@@ -134,6 +183,9 @@ final class ControlItem {
         }
     }
 
+    /// Logger for control items.
+    private static let logger = Logger(category: "ControlItem")
+
     /// The control item's hiding state (`@Published`).
     @Published var state = HidingState.hideSection
 
@@ -175,22 +227,78 @@ final class ControlItem {
     /// as last measured by the item manager.
     private var hostedHidingWidth: CGFloat?
 
-    /// The length that hides the section on macOS 27.
+    /// A blank status item that fills room the divider can't cover on its
+    /// own, on macOS 27, with the state of the search for its place beside
+    /// the divider. See ``hostedHidingLengths`` and ``updateSpacers(lengths:)``.
+    private struct Spacer {
+        let statusItem: NSStatusItem
+        let tag: MenuBarItemTag
+
+        /// The preferred position the spacer was created with.
+        var position: CGFloat
+
+        /// The largest position known to land the spacer too far toward the
+        /// trailing end, and the smallest known to land it too far toward
+        /// the leading end. Positions grow toward the leading end.
+        var tooTrailing: CGFloat = 0
+        var tooLeading: CGFloat?
+
+        /// How many times the spacer has been re-created in search of its
+        /// place.
+        var attempts = 0
+
+        /// Whether the item manager has confirmed the spacer's place.
+        var isPlaced = false
+
+        /// When the spacer was created. A verdict that arrives sooner than
+        /// the spacer's status window can catch up with the agent's layout
+        /// describes the previous attempt, and is ignored.
+        let createdAt = ContinuousClock.now
+    }
+
+    /// Blank status items that fill the room the divider can't cover on its
+    /// own, on macOS 27. See ``hostedHidingLengths``.
+    private var spacers = [Spacer]()
+
+    /// The lengths of the items that hide the section on macOS 27: the
+    /// divider first, then one for each spacer beside it.
     ///
-    /// macOS 27 hides an item only by overflowing it, so the divider is made
-    /// as wide as the room between the application menu and the visible
-    /// items, which the item manager measures (see
+    /// macOS 27 hides an item only by overflowing it, so the section is
+    /// hidden by filling the room between the application menu and the
+    /// visible items, which the item manager measures (see
     /// `MenuBarItemManager.hostedHidingWidths`). The system discards an item
-    /// wider than half its display, so on a wide display with few visible
-    /// items the divider can fall short and the section's leading items stay
-    /// on the bar. Until a measurement exists, the divider takes the most it
-    /// can; the first cache corrects it.
-    private var hostedHidingLength: CGFloat {
+    /// wider than half its display, so on a wide display the divider alone
+    /// falls short — a 3840pt display needs ~2900pt of filling and allows
+    /// 1904pt per item. The shortfall is made up with blank spacer items,
+    /// which fill the same room without being wider than the cap. The room is
+    /// divided evenly, so no spacer is near the cap unless it has to be.
+    ///
+    /// A status item has one length on every display, so the cap is that of
+    /// the narrowest display: an item over a display's cap is discarded there
+    /// yet still consumes room, wiping out the application menu, whereas an
+    /// item under the cap that doesn't fit simply overflows, taking the
+    /// section with it. Filling the widest display's room therefore hides the
+    /// section on every display at once.
+    ///
+    /// Until a measurement exists the divider stays collapsed, so the
+    /// section shows for a moment at launch. Taking the most it can instead
+    /// overflows the divider itself, and then which items the agent happens
+    /// to pack off the bar decides the first cache's sections, and with them
+    /// every later measurement (a visible item counted as hidden stays
+    /// hidden). Collapsed, the divider's place among the items is on the
+    /// bar for the first cache to read.
+    private var hostedHidingLengths: [CGFloat] {
         let padding = Lengths.hostedPadding
-        let screenWidth = (NSScreen.screenWithActiveMenuBar ?? NSScreen.main)?.frame.width ?? 1_000
+        let screenWidth = NSScreen.screens.map(\.frame.width).min() ?? 1_000
         let cap = (screenWidth / 2).rounded(.down) - padding
-        let width = hostedHidingWidth ?? cap
-        return min(max(width - padding, 0), cap)
+        guard let width = hostedHidingWidth else {
+            return [0]
+        }
+        // Each item occupies its length plus the agent's padding.
+        let slot = cap + padding
+        let count = min(max(Int((width / slot).rounded(.up)), 1), Lengths.maxHidingItems)
+        let length = min(max(width / CGFloat(count) - padding, 0), cap)
+        return Array(repeating: length, count: count)
     }
 
     /// A Boolean value that indicates whether the control item serves as
@@ -283,6 +391,13 @@ final class ControlItem {
                 .sink { [weak self] width in
                     self?.hostedHidingWidth = width
                     self?.updateStatusItem()
+                }
+                .store(in: &c)
+
+            appState.itemManager.$hostedSpacerPlacements
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] placements in
+                    self?.reconcileSpacers(placements: placements)
                 }
                 .store(in: &c)
         }
@@ -388,16 +503,11 @@ final class ControlItem {
     /// Records the control item's frame in ``hostedFrames``, converting from
     /// AppKit's flipped coordinates to screen coordinates.
     private func updateHostedFrame(_ frame: CGRect) {
-        guard isAddedToMenuBar, let primaryScreen = NSScreen.screens.first else {
+        guard isAddedToMenuBar else {
             Self.hostedFrames[identifier] = nil
             return
         }
-        Self.hostedFrames[identifier] = CGRect(
-            x: frame.minX,
-            y: primaryScreen.frame.height - frame.maxY,
-            width: frame.width,
-            height: frame.height
-        )
+        Self.hostedFrames[identifier] = Self.screenFrame(for: frame)
     }
 
     /// Updates the appearance of the status item using the current hiding state.
@@ -487,8 +597,14 @@ final class ControlItem {
 
         if #available(macOS 27.0, *), isSectionDivider, isVisible, state == .hideSection {
             constraint?.isActive = true
-            statusItem.length = hostedHidingLength
+            let lengths = hostedHidingLengths
+            statusItem.length = lengths[0]
+            updateSpacers(lengths: Array(lengths.dropFirst()))
             return
+        }
+
+        if #available(macOS 27.0, *), isSectionDivider {
+            updateSpacers(lengths: [])
         }
 
         if isVisible {
@@ -507,6 +623,149 @@ final class ControlItem {
                 let size = withMutableCopy(of: window.frame.size) { $0.width = shouldShow ? 3 : 1 }
                 window.setContentSize(size)
             }
+        }
+    }
+
+    /// Matches the divider's spacer items to the given lengths, creating and
+    /// removing them as needed.
+    ///
+    /// The spacers are blank and have no action. They are removed rather
+    /// than collapsed when the section is shown: a zero-length item still
+    /// occupies the agent's padding, which would leave a gap.
+    ///
+    /// A spacer fills room only if it sits between the section it hides and
+    /// the items that stay visible: the system overflows a contiguous run of
+    /// leading items, so a spacer left of a hidden item overflows itself and
+    /// leaves that item on the bar. Where a new item lands is set by its
+    /// preferred position, which macOS 27 honors for new items only and
+    /// measures in an ordering of its own that can't be read, so each spacer
+    /// is created at its best-known position and the item manager reports
+    /// where it landed (see ``reconcileSpacers(placements:)``).
+    @available(macOS 27.0, *)
+    private func updateSpacers(lengths: [CGFloat]) {
+        while spacers.count > lengths.count {
+            removeSpacer(spacers.removeLast())
+        }
+        var added = false
+        while spacers.count < lengths.count {
+            let tag = MenuBarItemTag(hostedSpacerFor: identifier, index: spacers.count)
+            // The best guess is a position a spacer has already been confirmed
+            // at, then one confirmed in an earlier session, then the divider's
+            // own recorded position.
+            let position = spacers.first { $0.isPlaced }?.position
+                ?? ControlItemDefaults[.hostedSpacerPosition, tag.title]
+                ?? ControlItemDefaults[.preferredPosition, identifier.rawValue]
+                ?? 1
+            spacers.append(createSpacer(tag: tag, position: position))
+            added = true
+        }
+        for (index, length) in lengths.enumerated() where spacers[index].statusItem.length != length {
+            spacers[index].statusItem.length = length
+        }
+        if added {
+            recacheSoon()
+        }
+    }
+
+    /// Creates a spacer with the given tag at the given preferred position.
+    @available(macOS 27.0, *)
+    private func createSpacer(tag: MenuBarItemTag, position: CGFloat) -> Spacer {
+        ControlItemDefaults[.preferredPosition, tag.title] = position
+        let statusItem = NSStatusBar.system.statusItem(withLength: 0)
+        statusItem.autosaveName = tag.title
+        // An item whose button is never touched gets a zero-width slot.
+        statusItem.button?.title = ""
+        statusItem.button?.appearsDisabled = true
+        Self.liveSpacers[tag] = statusItem
+        return Spacer(statusItem: statusItem, tag: tag, position: position)
+    }
+
+    /// Removes the given spacer from the menu bar.
+    @available(macOS 27.0, *)
+    private func removeSpacer(_ spacer: Spacer) {
+        Self.liveSpacers[spacer.tag] = nil
+        NSStatusBar.system.removeStatusItem(spacer.statusItem)
+        // Removing a status item deletes its preferred position, which is
+        // wanted here: the next spacer starts from a confirmed position.
+        ControlItemDefaults[.preferredPosition, spacer.tag.title] = nil
+    }
+
+    /// Moves any spacer the item manager found out of place, by re-creating
+    /// it at a new preferred position.
+    ///
+    /// Positions grow toward the leading end. A spacer that landed left of
+    /// an item it should hide needs a smaller position; one that landed
+    /// right of an item that stays visible needs a larger one. Each verdict
+    /// narrows the range, and the next attempt bisects it, until the spacer
+    /// lands between the two or the attempts run out. A confirmed position
+    /// is recorded for the next time the spacer is created.
+    @available(macOS 27.0, *)
+    private func reconcileSpacers(placements: [MenuBarItemTag: MenuBarItemManager.HostedSpacerPlacement]) {
+        var changed = false
+        for index in spacers.indices {
+            guard let placement = placements[spacers[index].tag] else {
+                continue
+            }
+            var spacer = spacers[index]
+            guard spacer.createdAt.duration(to: .now) > .milliseconds(800) else {
+                continue
+            }
+            switch placement {
+            case .fits:
+                if !spacer.isPlaced {
+                    spacer.isPlaced = true
+                    ControlItemDefaults[.hostedSpacerPosition, spacer.tag.title] = spacer.position
+                    spacers[index] = spacer
+                }
+                continue
+            case .tooFarLeading:
+                spacer.tooLeading = min(spacer.tooLeading ?? .infinity, spacer.position)
+            case .tooFarTrailing:
+                spacer.tooTrailing = max(spacer.tooTrailing, spacer.position)
+            }
+            guard spacer.attempts < Lengths.maxSpacerPlacementAttempts else {
+                continue
+            }
+            let next: CGFloat
+            if let tooLeading = spacer.tooLeading {
+                next = (spacer.tooTrailing + tooLeading) / 2
+            } else {
+                next = max(spacer.position * 2, spacer.position + 100)
+            }
+            guard abs(next - spacer.position) >= 0.5 else {
+                continue // The range has closed without a hit; give up.
+            }
+            Self.logger.info(
+                """
+                Spacer \(spacer.tag.title, privacy: .public) landed \(String(describing: placement), privacy: .public) \
+                at position \(spacer.position, privacy: .public); trying \(next, privacy: .public)
+                """
+            )
+            removeSpacer(spacer)
+            var replacement = createSpacer(tag: spacer.tag, position: next)
+            replacement.tooTrailing = spacer.tooTrailing
+            replacement.tooLeading = spacer.tooLeading
+            replacement.attempts = spacer.attempts + 1
+            replacement.statusItem.length = spacer.statusItem.length
+            spacers[index] = replacement
+            changed = true
+        }
+        if changed {
+            recacheSoon()
+        }
+    }
+
+    /// Asks the item manager to read the menu bar again shortly, so a
+    /// spacer that has just been created gets its placement verdict without
+    /// waiting for the next scheduled read.
+    @available(macOS 27.0, *)
+    private func recacheSoon() {
+        guard let appState else {
+            return
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(1))
+            await appState.itemManager.cacheItemsRegardless()
         }
     }
 
@@ -768,6 +1027,13 @@ extension ControlItemDefaults {
 extension ControlItemDefaults.Key<CGFloat> {
     /// String key: "NSStatusItem Preferred Position autosaveName"
     static let preferredPosition = Self(rawValue: "Preferred Position")
+
+    /// String key: "NSStatusItem Hosted Spacer Position autosaveName"
+    ///
+    /// The preferred position a spacer was last confirmed in place at
+    /// (macOS 27). Unlike the preferred position, it survives the spacer's
+    /// removal.
+    static let hostedSpacerPosition = Self(rawValue: "Hosted Spacer Position")
 }
 
 // MARK: ControlItemDefaults.Key<Bool>

@@ -43,23 +43,25 @@ enum HostedItemReader {
         let agentPID = agentApp.processIdentifier
         var items = [HostedMenuBarItem]()
 
-        for window in AXHelpers.windows(for: agent) {
+        for (hostIndex, window) in AXHelpers.windows(for: agent).enumerated() {
             guard let hostFrame = AXHelpers.frame(for: window) else {
                 continue
             }
             for slot in AXHelpers.children(for: window) {
                 guard
                     let frame = AXHelpers.frame(for: slot),
-                    frame.width > 0,
-                    let content = AXHelpers.children(for: slot).first,
-                    let sourcePID = AXHelpers.pid(for: content),
-                    sourcePID > 0 // The overflow chevron has no process behind it.
+                    frame.width > 0
                 else {
                     continue
                 }
+                // The overflow chevron has no process behind it, and no
+                // content element. It is kept, with a source pid of 0, so
+                // the app knows where it is.
+                let content = AXHelpers.children(for: slot).first
+                let sourcePID = content.flatMap(AXHelpers.pid(for:)) ?? 0
                 let isSystemExtra = sourcePID == agentPID
                 var identifier: String?
-                if isSystemExtra {
+                if isSystemExtra, let content {
                     // The hosting view wraps a menu extra element that carries
                     // a stable identifier ("com.apple.menuextra.clock").
                     let extra = AXHelpers.children(for: content).first ?? content
@@ -69,6 +71,7 @@ enum HostedItemReader {
                     HostedMenuBarItem(
                         frame: frame,
                         hostFrame: hostFrame,
+                        hostIndex: hostIndex,
                         sourcePID: sourcePID,
                         isSystemExtra: isSystemExtra,
                         identifier: identifier

@@ -537,6 +537,27 @@ extension HIDEventManager {
         guard let mouseLocation = MouseHelpers.locationCoreGraphics else {
             return false
         }
+        if #available(macOS 27.0, *) {
+            // Hosted items have no windows; their bounds come from the item
+            // cache. The hidden divider is not cached, so its blank span
+            // counts as empty space, as the room left of the items did before.
+            // The slots don't include the agent's spacing between items, so
+            // each is widened by it; otherwise the gaps between neighbours
+            // read as empty space.
+            let items = appState.itemManager.itemCache.managedItems
+            if items.contains(where: { $0.isOnScreen && $0.bounds.insetBy(dx: -8, dy: 0).contains(mouseLocation) }) {
+                return true
+            }
+            // The overflow chevron is the system's, not an item of ours, but
+            // clicking or hovering it is not "empty space" either.
+            // The chevron shifts by some 40 pt as the overflow opens and
+            // closes, and its frame is read only as the items are cached,
+            // so the band around it is generous.
+            if let chevron = MenuBarItem.hostedOverflowChevronFrames[screen.displayID] {
+                return chevron.insetBy(dx: -48, dy: 0).contains(mouseLocation)
+            }
+            return false
+        }
         let windowIDs = Bridging.getMenuBarWindowList(option: [.onScreen, .activeSpace, .itemsOnly])
         return windowIDs.contains { windowID in
             guard let bounds = Bridging.getWindowBounds(for: windowID) else {
