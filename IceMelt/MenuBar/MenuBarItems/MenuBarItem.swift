@@ -341,17 +341,43 @@ extension MenuBarItem {
             return [:]
         }
 
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let controlItemFramesForHosts = await ControlItem.hostedFrames
+
+        // The agent has been seen holding two windows for one display, with
+        // the same frame and slightly different layouts. Only one of them
+        // is what is drawn: the one in which our own divider sits where
+        // AppKit says its window is. Failing that, the one with more slots.
+        func hostItems(on displayID: CGDirectDisplayID) -> [HostedMenuBarItem] {
+            let displayBounds = CGDisplayBounds(displayID)
+            let byHost = Dictionary(grouping: hosted.filter { displayBounds.intersects($0.hostFrame) }, by: \.hostIndex)
+            guard byHost.count > 1 else {
+                return byHost.values.first ?? []
+            }
+            let matching = byHost.values.filter { items in
+                items.contains { item in
+                    item.sourcePID == ownPID && controlItemFramesForHosts.values.contains { frame in
+                        abs(frame.minX - item.frame.minX) <= 2 && abs(frame.minY - item.frame.minY) <= 40
+                    }
+                }
+            }
+            let candidates = matching.isEmpty ? Array(byHost.values) : matching
+            return candidates.max { $0.count < $1.count } ?? []
+        }
+
         var chevronFrames = [CGDirectDisplayID: CGRect]()
-        for item in hosted where item.isOverflowChevron {
-            for screen in NSScreen.screens where CGDisplayBounds(screen.displayID).intersects(item.hostFrame) {
-                chevronFrames[screen.displayID] = item.frame
+        var hostedByDisplay = [CGDirectDisplayID: [HostedMenuBarItem]]()
+        for screen in NSScreen.screens {
+            let items = hostItems(on: screen.displayID)
+            hostedByDisplay[screen.displayID] = items
+            if let chevron = items.first(where: \.isOverflowChevron) {
+                chevronFrames[screen.displayID] = chevron.frame
             }
         }
         await MainActor.run {
             hostedOverflowChevronFrames = chevronFrames
         }
 
-        let ownPID = ProcessInfo.processInfo.processIdentifier
         let agentPID = hosted.first { $0.isSystemExtra }?.sourcePID
             ?? NSRunningApplication
                 .runningApplications(withBundleIdentifier: HostedMenuBarItem.agentBundleIdentifier)
@@ -378,10 +404,9 @@ extension MenuBarItem {
         let displayIDs = NSScreen.screens.map(\.displayID)
 
         for displayID in displayIDs {
-            let displayBounds = CGDisplayBounds(displayID)
             var seen = Set<HostedMenuBarItem>()
-            let onDisplay = hosted
-                .filter { displayBounds.intersects($0.hostFrame) && !$0.isOverflowChevron }
+            let onDisplay = (hostedByDisplay[displayID] ?? [])
+                .filter { !$0.isOverflowChevron }
                 // The agent can list an item twice with the same frame while it
                 // is in the overflow. Keep the first.
                 .filter { seen.insert($0).inserted }

@@ -43,7 +43,7 @@ enum HostedItemReader {
         let agentPID = agentApp.processIdentifier
         var items = [HostedMenuBarItem]()
 
-        for window in AXHelpers.windows(for: agent) {
+        for (hostIndex, window) in AXHelpers.windows(for: agent).enumerated() {
             guard let hostFrame = AXHelpers.frame(for: window) else {
                 continue
             }
@@ -71,6 +71,7 @@ enum HostedItemReader {
                     HostedMenuBarItem(
                         frame: frame,
                         hostFrame: hostFrame,
+                        hostIndex: hostIndex,
                         sourcePID: sourcePID,
                         isSystemExtra: isSystemExtra,
                         identifier: identifier

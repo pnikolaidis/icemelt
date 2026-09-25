@@ -20,8 +20,15 @@ struct HostedMenuBarItem: Codable, Hashable {
     let frame: CGRect
 
     /// The frame of the menu bar window hosting the item, in screen
-    /// coordinates. There is one hosting window per display.
+    /// coordinates. There is one hosting window per display, normally.
     let hostFrame: CGRect
+
+    /// The index of the hosting window among the agent's windows.
+    ///
+    /// The agent has been seen holding two windows for one display, with
+    /// the same frame and slightly different layouts (2026-09-25), so the
+    /// frame alone can't tell the windows apart.
+    let hostIndex: Int
 
     /// The identifier of the process that created the item.
     ///
