@@ -2027,8 +2027,9 @@ extension MenuBarItemManager {
     private final class HostedShownSectionContext {
         /// The sections that were shown: the item's own, and the hidden
         /// section too when the item is always-hidden. Empty when the
-        /// system overflow was expanded instead.
-        let sections: [MenuBarSection.Name]
+        /// system overflow was expanded instead, unless the item needed
+        /// the dividers collapsed to get a slot there.
+        var sections: [MenuBarSection.Name]
 
         /// The clicked item, whose being on screen says whether the
         /// overflow is still expanded.
@@ -2184,7 +2185,16 @@ extension MenuBarItemManager {
                 logger.error("Error expanding the overflow: \(error, privacy: .public)")
                 return
             }
-            await waitForHostedItemOnBar(item)
+            if await !waitForHostedItemOnBar(item) {
+                // The expanded overflow has limited room, and the divider
+                // filling the bar takes some of it: collapse the dividers so
+                // the item gets a slot, and hide the sections again with it.
+                logger.debug("No slot for \(item.logString, privacy: .public) in the overflow, showing the sections too")
+                for (divider, _) in collapseDividers() where divider.identifier != .visible {
+                    context.sections.append(divider.identifier == .hidden ? .hidden : .alwaysHidden)
+                }
+                _ = await waitForHostedItemOnBar(item)
+            }
             let idsBeforeClick = Set(Bridging.getWindowList(option: .onScreen))
             do {
                 try await clickHosted(item: item, with: mouseButton)
@@ -2218,7 +2228,7 @@ extension MenuBarItemManager {
                 runRehideTimer()
             }
 
-            await waitForHostedItemOnBar(item)
+            _ = await waitForHostedItemOnBar(item)
 
             let idsBeforeClick = Set(Bridging.getWindowList(option: .onScreen))
             do {
@@ -2245,15 +2255,25 @@ extension MenuBarItemManager {
     /// Waits for the agent to lay the item out on the bar, up to
     /// ``hostedShowTimeout``.
     @available(macOS 27.0, *)
-    private func waitForHostedItemOnBar(_ item: MenuBarItem) async {
+    @discardableResult
+    private func waitForHostedItemOnBar(_ item: MenuBarItem) async -> Bool {
         let deadline = ContinuousClock.now + Self.hostedShowTimeout
+        var previousCount: Int?
         repeat {
             await eventSleep(for: .milliseconds(150))
             let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             if items.first(matching: item.tag)?.hasSlot == true {
-                return
+                return true
             }
+            // Once the bar has stopped changing, waiting longer won't help.
+            let count = items.filter(\.hasSlot).count
+            if let previousCount, previousCount == count {
+                return false
+            }
+            previousCount = count
+            await eventSleep(for: .milliseconds(250))
         } while ContinuousClock.now < deadline
+        return false
     }
 
     /// Hides the sections shown by ``temporarilyShowHosted(item:clickingWith:)``,
@@ -2284,7 +2304,7 @@ extension MenuBarItemManager {
         for section in Set(contexts.flatMap(\.sections)) {
             appState.menuBarManager.section(withName: section)?.hide()
         }
-        if let context = contexts.first(where: { $0.sections.isEmpty }) {
+        if let context = contexts.first {
             Task {
                 await collapseHostedOverflow(after: context)
             }
@@ -2409,17 +2429,17 @@ extension MenuBarItemManager {
                 await eventSleep(for: .milliseconds(400))
                 items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             }
+            // The expanded overflow has room for about the area left of the
+            // notch, and a divider filling the bar is laid out in it too,
+            // taking that room from the items (six of sixteen got no slot
+            // on 2026-09-25). The dividers are collapsed for the duration.
+            savedStates = collapseDividers()
+            await eventSleep(for: .milliseconds(300))
             logger.debug("Expanding the overflow to move \(item.logString, privacy: .public)")
             try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item)
             expandedOverflow = true
         } else if !(itemHasSlot && targetHasSlot) {
-            let dividers = appState.menuBarManager.sections
-                .filter { $0.name != .visible && $0.controlItem.isAddedToMenuBar }
-                .map(\.controlItem)
-            savedStates = dividers.map { ($0, $0.state) }
-            for divider in dividers where divider.state != .showSection {
-                divider.state = .showSection
-            }
+            savedStates = collapseDividers()
         }
 
         let maxAttempts = 3
@@ -2454,6 +2474,22 @@ extension MenuBarItemManager {
             await eventSleep(for: .milliseconds(300))
         }
         throw EventError.itemResponseTimeout(item)
+    }
+
+    /// Sets every divider on the bar to show its section, and returns the
+    /// states to restore afterwards.
+    private func collapseDividers() -> [(ControlItem, ControlItem.HidingState)] {
+        guard let appState else {
+            return []
+        }
+        let dividers = appState.menuBarManager.sections
+            .filter { $0.name != .visible && $0.controlItem.isAddedToMenuBar }
+            .map(\.controlItem)
+        let saved = dividers.map { ($0, $0.state) }
+        for divider in dividers where divider.state != .showSection {
+            divider.state = .showSection
+        }
+        return saved
     }
 
     /// Waits until both items are on the bar and returns their current
