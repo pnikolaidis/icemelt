@@ -2456,7 +2456,12 @@ extension MenuBarItemManager {
             // old frame lands on whatever item is there now.
             _ = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             if let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID] {
-                logger.debug("Expanding the overflow to move \(item.logString, privacy: .public)")
+                logger.debug(
+                    """
+                    Expanding the overflow to move \(item.logString, privacy: .public) \
+                    by clicking \(NSStringFromPoint(chevron.center), privacy: .public)
+                    """
+                )
                 try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item, leavingPointer: true)
                 expandedOverflow = true
             }
@@ -2521,7 +2526,6 @@ extension MenuBarItemManager {
     private func waitForHostedItemsOnBar(_ item: MenuBarItem, _ target: MenuBarItem) async throws -> (MenuBarItem, MenuBarItem, [MenuBarItem]) {
         let deadline = ContinuousClock.now + Self.hostedShowTimeout
         var missing = item
-        var previousCount: Int?
         repeat {
             let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             let current = items.first(matching: item.tag)
@@ -2530,15 +2534,23 @@ extension MenuBarItemManager {
                 return (current, currentTarget, items)
             }
             missing = current?.hasSlot == true ? target : item
-            // Once the bar has stopped changing, waiting longer won't help: on
-            // a display too narrow to show the section, the item never gets
-            // a slot.
-            let count = items.filter(\.hasSlot).count
-            if let previousCount, previousCount == count {
-                break
+            let displayID = Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
+            let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID].map(NSStringFromRect) ?? "none"
+            func describe(_ found: MenuBarItem?) -> String {
+                guard let found else {
+                    return "not listed"
+                }
+                return "\(NSStringFromRect(found.bounds)) slot=\(found.hasSlot) onBar=\(found.isOnScreen)"
             }
-            previousCount = count
-            await eventSleep(for: .milliseconds(400))
+            logger.debug(
+                """
+                Waiting for slots: \(items.filter(\.hasSlot).count, privacy: .public) of \
+                \(items.count, privacy: .public) items have one, chevron \(chevron, privacy: .public), \
+                \(item.logString, privacy: .public) \(describe(current), privacy: .public), \
+                \(target.logString, privacy: .public) \(describe(currentTarget), privacy: .public)
+                """
+            )
+            await eventSleep(for: .milliseconds(300))
         } while ContinuousClock.now < deadline
         throw EventError.hostedItemNotOnBar(missing)
     }
