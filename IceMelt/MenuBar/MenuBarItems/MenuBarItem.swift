@@ -4,6 +4,7 @@
 //
 
 import Cocoa
+import os
 
 /// A structural representation of a menu bar item.
 struct MenuBarItem: CustomStringConvertible {
@@ -470,6 +471,13 @@ extension MenuBarItem {
                         abs(frame.minX - item.frame.minX) <= 2 && abs(frame.minY - item.frame.minY) <= 40
                     }
                     guard let match = candidates.min(by: { abs($0.value.minX - item.frame.minX) < abs($1.value.minX - item.frame.minX) }) else {
+                        Logger.default.notice(
+                            """
+                            Unmatched own hosted slot on display \(displayID, privacy: .public) at \
+                            \(NSStringFromRect(item.frame), privacy: .public); own frames: \
+                            \(ownFrames.map { "\($0.key.title)=\(NSStringFromRect($0.value))" }.sorted(), privacy: .public)
+                            """
+                        )
                         return nil
                     }
                     tag = match.key
