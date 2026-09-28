@@ -102,6 +102,31 @@ or clicking an item means posting real events to the HID system at the slot's fr
 - Success of a move is judged by *order* (nothing else's slot between item and target),
   not by touching frames — slots beside system items have gaps.
 
+### Two displays, 2026-09-28 (4K main + laptop): hiding fails
+
+Measured with a probe app that adds blank status items (no synthetic input):
+- A higher `NSStatusItem Preferred Position` sits further left; each item takes its
+  length + 16pt. A re-created item honours a new position within ~0.5 s, and a new
+  item is listed in the AX tree within 0.2 s.
+- Overflow is strictly leading-first: packing from the trailing end, the first item
+  that doesn't fit **and everything left of it** overflow — not newest-first, not
+  first-fit (a small item left of an overflowed big one overflows too).
+
+What goes wrong in IceMelt on the 4K:
+- The room is measured from the frontmost app's menus (639pt Chrome, 204pt Finder),
+  so every app switch resizes the fillers and can add or remove spacers; a new one
+  shows a spinner while it loads.
+- One spacer ends up in the overflow while hidden items stay on the bar. The existing
+  code gives an overflowed spacer that the agent doesn't list no verdict, so it's
+  never moved. Judging it `tooFarLeading` (tried, not committed) bisected positions
+  531 → 2 and it still overflowed every time, and the position saved for it
+  (431.4375) didn't match any logged attempt. Unexplained; next step is to log each
+  re-created spacer's actual frame and saved position.
+- Measuring from the Apple menu instead (tried, not committed) over-fills, and by the
+  rule above the leading filler then overflows — a dead end.
+- At launch the hidden divider is often missing from the active display's list
+  ("Missing control item for hidden section"), so that cache pass is skipped.
+
 ### Known limits and open items
 
 - **Not tested on two displays.** The 4K was disconnected the whole time. Spacer
