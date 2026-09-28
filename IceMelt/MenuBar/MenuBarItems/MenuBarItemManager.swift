@@ -479,7 +479,12 @@ extension MenuBarItemManager {
                 // back to "Loading menu bar items…" for as long as it takes the
                 // list to change again, so keep the previous cache and clear the
                 // cached windowIDs so the next pass isn't skipped.
-                logger.warning("Missing control item for hidden section, keeping previous menu bar item cache")
+                logger.warning(
+                    """
+                    Missing control item for hidden section on display \(displayID ?? 0, privacy: .public), \
+                    keeping previous menu bar item cache; IceMelt items: \(items.filter { $0.tag.namespace == .iceMelt }.map { "\($0.tag.title)@\(Int($0.bounds.minX))" }, privacy: .public)
+                    """
+                )
                 await cacheActor.clearCachedItemWindowIDs()
                 return
             }
@@ -591,6 +596,12 @@ extension MenuBarItemManager {
                 guard let width = hostedHidingWidth(for: identifier, in: onBar, regionLeft: regionLeft) else {
                     continue
                 }
+                logger.notice(
+                    """
+                    Hiding room for \(identifier.rawValue, privacy: .public) on display \(displayID, privacy: .public): \
+                    \(width, privacy: .public) (region from \(regionLeft, privacy: .public), \(onBar.count, privacy: .public) items on bar)
+                    """
+                )
                 measured[identifier] = max(measured[identifier] ?? 0, width)
             }
         }
