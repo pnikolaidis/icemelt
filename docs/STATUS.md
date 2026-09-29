@@ -126,6 +126,18 @@ What goes wrong in IceMelt on the 4K:
   rule above the leading filler then overflows — a dead end.
 - At launch the hidden divider is often missing from the active display's list
   ("Missing control item for hidden section"), so that cache pass is skipped.
+- Later on 2026-09-28: IceMelt matches its own AX slots to its items by window frame,
+  but each item has one window and a slot per display. Spacer2's window sat on the
+  laptop at x=0 while its 4K slot was in the overflow, left of the hidden items
+  (Chrome, bzbmenu, Rectangle overflowed with it). Its saved position (431) is below
+  the divider's (531), which should put it right of the divider. Unexplained.
+- Diagnostic logging in 341971c (room per display, missing divider) and 21ca180
+  (unmatched own slots). Probe sources were scratch; re-create from the rules above.
+
+**Resume here (4K unavailable until ~early October):** run IceMelt with the 4K
+alone (laptop lid closed) to learn whether the second display causes the misordering.
+If it doesn't, log each spacer's slot order right after creation, against its
+position and the divider's.
 
 ### Known limits and open items
 
