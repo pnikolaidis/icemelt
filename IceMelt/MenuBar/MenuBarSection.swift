@@ -3,6 +3,7 @@
 //  IceMelt
 //
 
+import OSLog
 import SwiftUI
 
 /// A representation of a section in a menu bar.
@@ -150,10 +151,11 @@ final class MenuBarSection {
     }
 
     /// Shows the section.
-    func show() {
+    func show(caller: String = #fileID, line: Int = #line) {
         guard let menuBarManager, isHidden else {
             return
         }
+        Logger.default.notice("Showing \(self.name.logString, privacy: .public) section (from \(caller, privacy: .public):\(line, privacy: .public))")
 
         guard controlItem.isAddedToMenuBar else {
             // The section is disabled.
@@ -209,10 +211,11 @@ final class MenuBarSection {
     }
 
     /// Hides the section.
-    func hide() {
+    func hide(caller: String = #fileID, line: Int = #line) {
         guard let menuBarManager, !isHidden else {
             return
         }
+        Logger.default.notice("Hiding \(self.name.logString, privacy: .public) section (from \(caller, privacy: .public):\(line, privacy: .public))")
 
         menuBarManager.iceMeltBarPanel.close() // Make sure IceMelt Bar is always closed.
         menuBarManager.showOnHoverAllowed = true
@@ -231,8 +234,8 @@ final class MenuBarSection {
     }
 
     /// Toggles the visibility of the section.
-    func toggle() {
-        if isHidden { show() } else { hide() }
+    func toggle(caller: String = #fileID, line: Int = #line) {
+        if isHidden { show(caller: caller, line: line) } else { hide(caller: caller, line: line) }
     }
 
     /// Re-measures the menu bar shortly after a section changes state.
