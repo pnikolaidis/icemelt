@@ -2230,11 +2230,25 @@ extension MenuBarItemManager {
             defer {
                 runRehideTimer()
             }
-            do {
-                try await postHostedClick(at: chevron.center, with: .left, for: item, leavingPointer: true)
-            } catch {
-                logger.error("Error expanding the overflow: \(error, privacy: .public)")
-                return
+            // The overflow may still be open, from an earlier click or the
+            // user's own: clicking the chevron then closes it, the item loses
+            // its slot, and the click fails until the user tries again. An
+            // open overflow may also lack room for this item; the sections
+            // are shown below to make room.
+            let current = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+            let isLaidOut = current.first(matching: item.tag)?.hasSlot == true
+            let isOverflowOpen = current.contains { !$0.isControlItem && $0.hasSlot && !$0.isOnScreen }
+            if isLaidOut {
+                logger.debug("\(item.logString, privacy: .public) is already laid out, not clicking the chevron")
+            } else if isOverflowOpen {
+                logger.debug("The overflow is open without \(item.logString, privacy: .public), not clicking the chevron")
+            } else {
+                do {
+                    try await postHostedClick(at: chevron.center, with: .left, for: item, leavingPointer: true)
+                } catch {
+                    logger.error("Error expanding the overflow: \(error, privacy: .public)")
+                    return
+                }
             }
             if await !waitForHostedItemOnBar(item) {
                 // The expanded overflow has limited room, and the divider
@@ -2244,6 +2258,9 @@ extension MenuBarItemManager {
                 for (divider, _) in collapseDividers() where divider.identifier != .visible {
                     context.sections.append(divider.identifier == .hidden ? .hidden : .alwaysHidden)
                 }
+                // Let the reflow begin, or the wait sees an unchanged bar and
+                // gives up at once.
+                await eventSleep(for: .milliseconds(400))
                 _ = await waitForHostedItemOnBar(item)
             }
             let idsBeforeClick = Set(Bridging.getWindowList(option: .onScreen))
@@ -2257,6 +2274,7 @@ extension MenuBarItemManager {
             context.shownInterfaceWindow = WindowInfo.createWindows(option: .onScreen).first { window in
                 window.ownerPID == item.sourcePID && !idsBeforeClick.contains(window.windowID)
             }
+            closeOverflowWhenInterfaceCloses(context)
             return
         }
 
@@ -2292,6 +2310,7 @@ extension MenuBarItemManager {
             context.shownInterfaceWindow = WindowInfo.createWindows(option: .onScreen).first { window in
                 window.ownerPID == item.sourcePID && !idsBeforeClick.contains(window.windowID)
             }
+            closeOverflowWhenInterfaceCloses(context)
             return
         }
 
@@ -2359,6 +2378,31 @@ extension MenuBarItemManager {
             Task {
                 await collapseHostedOverflow(after: context)
             }
+        }
+    }
+
+    /// Rehides as soon as the interface a click opened has closed, rather
+    /// than when the rehide timer fires (macOS 27).
+    ///
+    /// The open overflow lays the hidden items out from the leading end of
+    /// the bar, so it shouldn't linger once the item's menu is gone. It
+    /// can't close sooner: clicking the chevron would dismiss the menu. With
+    /// no interface window found, the rehide timer still applies.
+    @available(macOS 27.0, *)
+    private func closeOverflowWhenInterfaceCloses(_ context: HostedShownSectionContext) {
+        guard let window = context.shownInterfaceWindow else {
+            return
+        }
+        Task { [weak self] in
+            let deadline = ContinuousClock.now + Self.maxInterfaceDeferral
+            while Self.isInterfaceShowing(window), ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+            guard let self, hostedShownSectionContexts.contains(where: { $0 === context }) else {
+                return // Already rehidden.
+            }
+            logger.debug("Interface closed, rehiding")
+            await rehideTemporarilyShownItems()
         }
     }
 
