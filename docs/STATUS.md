@@ -148,10 +148,11 @@ position and the divider's.
   tens of units wide.
 - **Flicker during a move**: the overflow visibly opens, and when the dividers must be
   collapsed the bar reflows twice. Inherent to the approach; reduced, not gone.
-- Dragging next to a *system* item (Focus, battery) is unverified.
+- Dragging next to a *system* item works (Hostbar beside Battery, verified by hand
+  2026-09-29, with a visible delay while the bar reflows).
 - IceMelt Bar / search clicks on hidden items take the same overflow route; the click
-  inside the overflow and the collapse afterwards are implemented but **unverified by
-  hand**. Thumbnails are app icons / SF Symbols, not live images.
+  inside the overflow and the collapse afterwards are **verified by hand on the
+  built-in display** (Granola, 2026-09-29). Thumbnails are app icons / SF Symbols, not live images.
 - On a narrow display where the divider itself overflows, `ControlItemPair` fails
   ("Missing control item for hidden section") and the cache keeps its previous value;
   the Layout pane can sit on its spinner if that display is active at launch.
