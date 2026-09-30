@@ -2597,9 +2597,16 @@ extension MenuBarItemManager {
                 logger.debug("Collapsing the dividers to make room in the overflow")
                 savedStates = collapseDividers()
                 await eventSleep(for: .milliseconds(400))
-                _ = await MenuBarItem.getMenuBarItems(option: .activeSpace)
-                if let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID] {
-                    try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item, leavingPointer: true)
+                // The chevron moves as the bar reflows, and the reflow may or
+                // may not have closed the overflow: click it only once it holds
+                // still, and only if the overflow is closed, or the click
+                // misses or shuts it.
+                if let chevron = await settledOverflowChevronFrame(on: displayID) {
+                    let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+                    let isOpen = items.contains { !$0.isControlItem && $0.hasSlot && !$0.isOnScreen }
+                    if !isOpen {
+                        try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item, leavingPointer: true)
+                    }
                     expandedOverflow = true
                 }
             }
