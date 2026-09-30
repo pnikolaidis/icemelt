@@ -49,6 +49,16 @@ final class ControlItem {
         }
     }
 
+    /// The frames of the control items currently in the menu bar, in screen
+    /// coordinates, keyed by identifier.
+    ///
+    /// As of macOS 27, the menu bar is hosted by `MenuBarAgent` and the control
+    /// items' windows no longer report a meaningful position through the window
+    /// server. Their AppKit frames still track the agent's layout, which is how
+    /// hosted items are matched back to the control items (see
+    /// ``MenuBarItem/getMenuBarItems(on:option:)``).
+    private(set) static var hostedFrames = [Identifier: CGRect]()
+
     /// A hiding state for a control item.
     enum HidingState {
         case showSection
@@ -58,7 +68,15 @@ final class ControlItem {
     /// A namespace for control item lengths.
     private enum Lengths {
         static let standard: CGFloat = NSStatusItem.variableLength
+
+        /// The length of a section divider that is hiding its section, before
+        /// macOS 27: an item this wide pushes everything to its left off the
+        /// screen. On macOS 27 the length is measured instead; see
+        /// `hostedHidingLengths`.
         static let expanded: CGFloat = 10_000
+
+        /// The padding macOS 27 adds around a status item's length.
+        static let hostedPadding: CGFloat = 16
     }
 
     /// Storage for a control item's underlying status item.
@@ -153,6 +171,28 @@ final class ControlItem {
         storage.constraint
     }
 
+    /// The width the divider should have to hide its section on macOS 27,
+    /// as last measured by the item manager.
+    private var hostedHidingWidth: CGFloat?
+
+    /// The length that hides the section on macOS 27.
+    ///
+    /// macOS 27 hides an item only by overflowing it, so the divider is made
+    /// as wide as the room between the application menu and the visible
+    /// items, which the item manager measures (see
+    /// `MenuBarItemManager.hostedHidingWidths`). The system discards an item
+    /// wider than half its display, so on a wide display with few visible
+    /// items the divider can fall short and the section's leading items stay
+    /// on the bar. Until a measurement exists, the divider takes the most it
+    /// can; the first cache corrects it.
+    private var hostedHidingLength: CGFloat {
+        let padding = Lengths.hostedPadding
+        let screenWidth = (NSScreen.screenWithActiveMenuBar ?? NSScreen.main)?.frame.width ?? 1_000
+        let cap = (screenWidth / 2).rounded(.down) - padding
+        let width = hostedHidingWidth ?? cap
+        return min(max(width - padding, 0), cap)
+    }
+
     /// A Boolean value that indicates whether the control item serves as
     /// a divider between sections.
     var isSectionDivider: Bool {
@@ -229,8 +269,23 @@ final class ControlItem {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] frame in
                 self?.frame = frame
+                self?.updateHostedFrame(frame)
             }
             .store(in: &c)
+
+        if let appState, isSectionDivider, #available(macOS 27.0, *) {
+            // The hiding length is measured by the item manager as it caches
+            // (see `hostedHidingLength`).
+            appState.itemManager.$hostedHidingWidths
+                .map { [identifier] widths in widths[identifier] }
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] width in
+                    self?.hostedHidingWidth = width
+                    self?.updateStatusItem()
+                }
+                .store(in: &c)
+        }
 
         $window.removeNil()
             .flatMap { $0.publisher(for: \.screen) }
@@ -330,6 +385,21 @@ final class ControlItem {
         cancellables = c
     }
 
+    /// Records the control item's frame in ``hostedFrames``, converting from
+    /// AppKit's flipped coordinates to screen coordinates.
+    private func updateHostedFrame(_ frame: CGRect) {
+        guard isAddedToMenuBar, let primaryScreen = NSScreen.screens.first else {
+            Self.hostedFrames[identifier] = nil
+            return
+        }
+        Self.hostedFrames[identifier] = CGRect(
+            x: frame.minX,
+            y: primaryScreen.frame.height - frame.maxY,
+            width: frame.width,
+            height: frame.height
+        )
+    }
+
     /// Updates the appearance of the status item using the current hiding state.
     private func updateStatusItem() {
         guard
@@ -412,6 +482,12 @@ final class ControlItem {
     /// item's window if needed.
     private func updateStatusItemVisibility(_ isVisible: Bool) {
         guard let appState else {
+            return
+        }
+
+        if #available(macOS 27.0, *), isSectionDivider, isVisible, state == .hideSection {
+            constraint?.isActive = true
+            statusItem.length = hostedHidingLength
             return
         }
 

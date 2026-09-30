@@ -38,6 +38,8 @@ final class Listener {
             case .sourcePIDs(let windows):
                 let pids = SourcePIDCache.shared.pids(for: windows)
                 return .sourcePIDs(pids)
+            case .hostedItems:
+                return .hostedItems(HostedItemReader.read())
             }
         } catch {
             Logger.default.error("Listener failed to handle message with error \(error)")

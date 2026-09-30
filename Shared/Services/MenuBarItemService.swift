@@ -15,11 +15,13 @@ extension MenuBarItemService {
         case start
         case sourcePID(WindowInfo)
         case sourcePIDs([WindowInfo])
+        case hostedItems
     }
 
     enum Response: Codable {
         case start
         case sourcePID(pid_t?)
         case sourcePIDs([CGWindowID: pid_t])
+        case hostedItems([HostedMenuBarItem])
     }
 }

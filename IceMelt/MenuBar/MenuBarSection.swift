@@ -205,6 +205,7 @@ final class MenuBarSection {
         }
 
         startRehideChecks()
+        recacheAfterStateChange()
     }
 
     /// Hides the section.
@@ -226,11 +227,27 @@ final class MenuBarSection {
         }
 
         stopRehideChecks()
+        recacheAfterStateChange()
     }
 
     /// Toggles the visibility of the section.
     func toggle() {
         if isHidden { show() } else { hide() }
+    }
+
+    /// Re-measures the menu bar shortly after a section changes state.
+    ///
+    /// On macOS 27 the hiding widths of the dividers depend on what is on
+    /// the bar (see `MenuBarItemManager.hostedHidingWidths`), and a section
+    /// showing or hiding changes that.
+    private func recacheAfterStateChange() {
+        guard #available(macOS 27.0, *), let appState else {
+            return
+        }
+        Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            await appState.itemManager.cacheItemsRegardless()
+        }
     }
 
     /// Starts running checks to determine when to rehide the section.

@@ -14,6 +14,16 @@ final class MenuBarItemManager: ObservableObject {
     /// The current cache of menu bar items.
     @Published private(set) var itemCache = ItemCache(displayID: nil)
 
+    /// The identifier of the display with the active menu bar, as of the
+    /// most recent cache operation.
+    @Published private(set) var activeMenuBarDisplayID: CGDirectDisplayID?
+
+    /// How wide each section divider should be to hide its section on
+    /// macOS 27, keyed by the divider's identifier (see
+    /// ``hostedHidingWidth(for:in:regionLeft:)``). Updated with each cache
+    /// operation; a divider that couldn't be measured is absent.
+    @Published private(set) var hostedHidingWidths = [ControlItem.Identifier: CGFloat]()
+
     /// Logger for the menu bar item manager.
     private nonisolated let logger = Logger.menuBarItemManager
 
@@ -55,6 +65,9 @@ final class MenuBarItemManager: ObservableObject {
         NSWorkspace.shared.publisher(for: \.runningApplications)
             .delay(for: 0.25, scheduler: DispatchQueue.main)
             .discardMerge(Timer.publish(every: 5, on: .main, in: .default).autoconnect())
+            // On macOS 27 the room for hiding depends on the width of the
+            // frontmost app's menu (see `updateHostedHidingWidths`).
+            .discardMerge(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification))
             .debounce(for: 1, scheduler: DispatchQueue.main)
             .sink { [weak self] in
                 guard let self else {
@@ -243,7 +256,10 @@ extension MenuBarItemManager {
         }
 
         func bestBounds(for item: MenuBarItem) -> CGRect {
-            Bridging.getWindowBounds(for: item.windowID) ?? item.bounds
+            if item.isHosted {
+                return item.bounds // The only geometry a hosted item has.
+            }
+            return Bridging.getWindowBounds(for: item.windowID) ?? item.bounds
         }
 
         func isValidForCaching(_ item: MenuBarItem) -> Bool {
@@ -260,6 +276,12 @@ extension MenuBarItemManager {
         }
 
         mutating func findSection(for item: MenuBarItem) -> MenuBarSection.Name? {
+            if item.isHosted, !item.isOnScreen {
+                // In the system overflow (macOS 27), so hidden, with no position
+                // to say which hidden section. If the always-hidden divider is
+                // on the bar, only the always-hidden section is in the overflow.
+                return controlItems.alwaysHidden?.isOnScreen == true ? .alwaysHidden : .hidden
+            }
             lazy var itemBounds = bestBounds(for: item)
             return MenuBarSection.Name.allCases.first { section in
                 switch section {
@@ -388,7 +410,12 @@ extension MenuBarItemManager {
             }
 
             let displayID = Bridging.getActiveMenuBarDisplayID()
+            activeMenuBarDisplayID = displayID
             var items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+
+            if #available(macOS 27.0, *), let displayID {
+                updateHostedHidingWidths(items: items, displayID: displayID)
+            }
 
             let itemWindowIDs = currentItemWindowIDs ?? items.reversed().map { $0.windowID }
             await cacheActor.updateCachedItemWindowIDs(itemWindowIDs)
@@ -410,6 +437,81 @@ extension MenuBarItemManager {
         }
     }
 
+    /// Updates ``hostedHidingWidths`` from the given hosted items.
+    ///
+    /// macOS 27 lays the menu bar out itself: items are packed from the
+    /// trailing end, and whatever doesn't fit between the application menu
+    /// and the trailing items goes into the system's overflow. That overflow
+    /// is the only way to hide an item, so a divider hides its section by
+    /// being just wide enough that the section no longer fits. Too narrow
+    /// and the section's leading items stay visible; too wide and the
+    /// divider overflows too, taking the section out of the agent's
+    /// accessibility tree so it can't be listed. The target is the room
+    /// between the application menu and the first item that must stay
+    /// visible, less a margin narrower than any item.
+    @available(macOS 27.0, *)
+    private func updateHostedHidingWidths(items: [MenuBarItem], displayID: CGDirectDisplayID) {
+        guard
+            let screen = NSScreen.screens.first(where: { $0.displayID == displayID }),
+            let applicationMenuFrame = screen.getApplicationMenuFrame()
+        else {
+            return
+        }
+        // The application menu is always reported on the main display, but
+        // it is the same width on every display.
+        let displayBounds = CGDisplayBounds(displayID)
+        var regionLeft = displayBounds.minX + (applicationMenuFrame.maxX - CGDisplayBounds(CGMainDisplayID()).minX)
+        if let notch = screen.frameOfNotch {
+            regionLeft = max(regionLeft, notch.maxX)
+        }
+        regionLeft += 16 // The agent's own leading padding.
+
+        // Items in the overflow are sometimes still listed. They aren't on
+        // the bar, so they don't bound the room.
+        let onBar = items.filter(\.isOnScreen)
+
+        var widths = hostedHidingWidths
+        for identifier in [ControlItem.Identifier.hidden, .alwaysHidden] {
+            guard let width = hostedHidingWidth(for: identifier, in: onBar, regionLeft: regionLeft) else {
+                continue
+            }
+            // Every change reflows the bar, so ignore ones too small to matter.
+            if let current = widths[identifier], abs(current - width) < 8 {
+                continue
+            }
+            widths[identifier] = width
+        }
+        if widths != hostedHidingWidths {
+            hostedHidingWidths = widths
+        }
+    }
+
+    /// Returns the width that the given divider should have to hide its
+    /// section, or `nil` if it can't be determined.
+    ///
+    /// The first item that must stay visible is the divider's right-hand
+    /// neighbour. If the divider is not on the bar (it overflowed, so it is
+    /// too wide), everything on the bar is visible, and its leading item is
+    /// the bound.
+    @available(macOS 27.0, *)
+    private func hostedHidingWidth(
+        for identifier: ControlItem.Identifier,
+        in onBar: [MenuBarItem],
+        regionLeft: CGFloat
+    ) -> CGFloat? {
+        let visibleFrom: CGFloat
+        if let divider = onBar.first(matching: identifier.tag) {
+            visibleFrom = divider.bounds.maxX
+        } else if let leading = onBar.map(\.bounds.minX).min() {
+            visibleFrom = leading
+        } else {
+            return nil
+        }
+        // The margin must be narrower than any item, or the section's last
+        // item would stay on the bar.
+        return max(visibleFrom - regionLeft - 8, 0)
+    }
+
     /// Caches the current menu bar items, if the items have changed
     /// since the previous cache.
     ///
@@ -417,6 +519,13 @@ extension MenuBarItemManager {
     /// the hidden and always-hidden sections are correctly ordered,
     /// arranging them into valid positions if needed.
     func cacheItemsIfNeeded() async {
+        if #available(macOS 27.0, *) {
+            // Hosted items have no windows to compare, so read the agent's tree
+            // every time; the cache is only published when it actually changes.
+            await cacheItemsRegardless()
+            return
+        }
+
         let itemWindowIDs = Bridging.getMenuBarWindowList(option: [.itemsOnly, .activeSpace])
         if await cacheActor.cachedItemWindowIDs != itemWindowIDs {
             await cacheItemsRegardless(itemWindowIDs)
@@ -466,6 +575,9 @@ extension MenuBarItemManager {
         case itemResponseTimeout(MenuBarItem)
         /// A menu bar item's bounds cannot be found.
         case missingItemBounds(MenuBarItem)
+        /// A menu bar item is hosted by `MenuBarAgent`, which IceMelt cannot
+        /// yet drive (macOS 27 and later).
+        case itemIsHosted(MenuBarItem)
 
         var description: String {
             switch self {
@@ -485,6 +597,8 @@ extension MenuBarItemManager {
                 "\(Self.self).itemResponseTimeout(item: \(item.tag))"
             case .missingItemBounds(let item):
                 "\(Self.self).missingItemBounds(item: \(item.tag))"
+            case .itemIsHosted(let item):
+                "\(Self.self).itemIsHosted(item: \(item.tag))"
             }
         }
 
@@ -506,12 +620,20 @@ extension MenuBarItemManager {
                 "\"\(item.displayName)\" took too long to respond"
             case .missingItemBounds(let item):
                 "Missing bounds rectangle for \"\(item.displayName)\""
+            case .itemIsHosted(let item):
+                "IceMelt can't move or click \"\(item.displayName)\" on this version of macOS yet"
             }
         }
 
         var recoverySuggestion: String? {
-            if case .itemNotMovable = self { return nil }
-            return "Please try again. If the error persists, please file a bug report."
+            switch self {
+            case .itemNotMovable:
+                nil
+            case .itemIsHosted:
+                "Items can be arranged with ⌘ Command + dragging them in the menu bar."
+            default:
+                "Please try again. If the error persists, please file a bug report."
+            }
         }
     }
 
@@ -1225,6 +1347,9 @@ extension MenuBarItemManager {
         guard item.isMovable else {
             throw EventError.itemNotMovable(item)
         }
+        guard !item.isHosted, !destination.targetItem.isHosted else {
+            throw EventError.itemIsHosted(item)
+        }
         guard let appState else {
             throw EventError.cannotComplete
         }
@@ -1377,6 +1502,9 @@ extension MenuBarItemManager {
     ///   - item: The menu bar item to click.
     ///   - mouseButton: The mouse button to click the item with.
     func click(item: MenuBarItem, with mouseButton: CGMouseButton) async throws {
+        guard !item.isHosted else {
+            throw EventError.itemIsHosted(item)
+        }
         guard let appState else {
             throw EventError.cannotComplete
         }

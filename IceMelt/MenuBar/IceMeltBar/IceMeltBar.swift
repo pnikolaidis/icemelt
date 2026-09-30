@@ -143,8 +143,11 @@ final class IceMeltBarPanel: NSPanel {
                     lowerBound <= upperBound,
                     let controlItem = appState.itemManager.itemCache.managedItems.first(matching: .visibleControlItem),
                     // Bridging API is more reliable than controlItem.frame in some
-                    // cases (like if the item is offscreen).
-                    let itemBounds = Bridging.getWindowBounds(for: controlItem.windowID)
+                    // cases (like if the item is offscreen). A hosted item (macOS 27)
+                    // has no window; its cached bounds are what the agent reported.
+                    let itemBounds = controlItem.isHosted
+                        ? controlItem.bounds
+                        : Bridging.getWindowBounds(for: controlItem.windowID)
                 else {
                     return originForRightOfScreen
                 }

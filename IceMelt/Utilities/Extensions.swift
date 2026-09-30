@@ -3,6 +3,7 @@
 //  IceMelt
 //
 
+import AXSwift
 import Combine
 import SwiftUI
 
@@ -554,10 +555,20 @@ extension NSScreen {
     func getApplicationMenuFrame() -> CGRect? {
         let displayBounds = CGDisplayBounds(displayID)
 
-        guard
-            let menuBar = AXHelpers.element(at: displayBounds.origin),
-            AXHelpers.role(for: menuBar) == .menuBar
-        else {
+        // On macOS 27 the exact corner belongs to MenuBarAgent's menu bar
+        // window rather than the menu bar element, so probe just inside it.
+        let probes = [CGPoint(x: 2, y: 2), CGPoint(x: 5, y: 5), .zero].map { offset in
+            CGPoint(x: displayBounds.origin.x + offset.x, y: displayBounds.origin.y + offset.y)
+        }
+        guard let menuBar = probes.lazy.compactMap({ point -> UIElement? in
+            guard
+                let element = AXHelpers.element(at: point),
+                AXHelpers.role(for: element) == .menuBar
+            else {
+                return nil
+            }
+            return element
+        }).first else {
             return nil
         }
 
