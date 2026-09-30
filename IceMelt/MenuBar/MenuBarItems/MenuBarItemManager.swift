@@ -30,6 +30,9 @@ final class MenuBarItemManager: ObservableObject {
     /// that couldn't be judged is absent.
     @Published private(set) var hostedSpacerPlacements = [MenuBarItemTag: HostedSpacerPlacement]()
 
+    /// Whether ``setHostedOverflowExpanded(_:)`` is running (macOS 27).
+    private var isSettingHostedOverflow = false
+
     /// Where a divider's spacer landed relative to the sections on macOS 27.
     enum HostedSpacerPlacement {
         /// Between the section the divider hides and the items that stay
@@ -2544,6 +2547,42 @@ extension MenuBarItemManager {
             await eventSleep(for: .milliseconds(300))
         }
         throw EventError.itemResponseTimeout(item)
+    }
+
+    /// Opens or closes the system overflow on the active display, if it
+    /// isn't that way already (macOS 27).
+    ///
+    /// Shown in place, a section fills the bar just left of the chevron and
+    /// the rest of it stays in the overflow; opening the overflow as well
+    /// lays those items out too, left of the notch, as a click on the
+    /// chevron does. The overflow counts as open when an item other than
+    /// ours has a slot left of the chevron.
+    @available(macOS 27.0, *)
+    func setHostedOverflowExpanded(_ expanded: Bool) async {
+        // Several sections change state together; a second click would undo
+        // the first.
+        guard !isSettingHostedOverflow else {
+            return
+        }
+        isSettingHostedOverflow = true
+        defer {
+            isSettingHostedOverflow = false
+        }
+        let displayID = Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
+        guard let chevron = await settledOverflowChevronFrame(on: displayID) else {
+            return
+        }
+        let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+        let isExpanded = items.contains { !$0.isControlItem && $0.hasSlot && !$0.isOnScreen }
+        guard isExpanded != expanded, let anyItem = items.first else {
+            return
+        }
+        logger.debug("\(expanded ? "Opening" : "Closing", privacy: .public) the overflow")
+        do {
+            try await postHostedClick(at: chevron.center, with: .left, for: anyItem)
+        } catch {
+            logger.error("Error toggling the overflow: \(error, privacy: .public)")
+        }
     }
 
     /// Returns the overflow chevron's frame on the given display once it
