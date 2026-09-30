@@ -2462,11 +2462,16 @@ extension MenuBarItemManager {
         // Open means some item other than ours is laid out left of the
         // chevron. Not necessarily the clicked or moved item: one moved onto
         // the bar proper leaves the overflow open behind it.
+        // The bar may still be reflowing, after dividers were restored, so
+        // the chevron is read once it holds still.
+        let displayID = Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
+        guard let chevron = await settledOverflowChevronFrame(on: displayID) else {
+            return
+        }
         let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
         guard
             let item = items.first(matching: context.tag) ?? items.first,
-            items.contains(where: { !$0.isControlItem && $0.hasSlot && !$0.isOnScreen }),
-            let chevron = MenuBarItem.hostedOverflowChevronFrames[Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()]
+            items.contains(where: { !$0.isControlItem && $0.hasSlot && !$0.isOnScreen })
         else {
             return
         }
@@ -2568,13 +2573,19 @@ extension MenuBarItemManager {
                 current.bounds.minX >= divider.bounds.maxX
             {
                 logger.debug("Dropping \(item.logString, privacy: .public) left of the hidden divider first")
-                MouseHelpers.hideCursor()
-                try await postHostedDragEvents(
-                    item: item,
-                    from: current.bounds.center,
-                    to: CGPoint(x: divider.bounds.minX - 3, y: divider.bounds.midY)
-                )
-                MouseHelpers.showCursor()
+                do {
+                    // Shown again even if the drag throws, or the pointer
+                    // stays hidden.
+                    MouseHelpers.hideCursor()
+                    defer {
+                        MouseHelpers.showCursor()
+                    }
+                    try await postHostedDragEvents(
+                        item: item,
+                        from: current.bounds.center,
+                        to: CGPoint(x: divider.bounds.minX - 3, y: divider.bounds.midY)
+                    )
+                }
                 await eventSleep(for: .milliseconds(400))
                 items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             }
