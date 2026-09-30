@@ -1777,6 +1777,9 @@ extension MenuBarItemManager {
     /// Gets the destination to return the given item to after it is
     /// temporarily shown.
     private func getReturnDestination(for item: MenuBarItem, in items: [MenuBarItem]) -> MoveDestination? {
+        if item.isHosted {
+            return getHostedReturnDestination(for: item, in: items)
+        }
         // Match the window, not the tag: a duplicate window with the same tag
         // would otherwise yield the neighbors of the wrong item (issue #38).
         guard let index = items.firstIndex(where: { $0.windowID == item.windowID }) else {
@@ -1789,6 +1792,36 @@ extension MenuBarItemManager {
             return .rightOfItem(items[index - 1])
         }
         return nil
+    }
+
+    /// Returns where a hosted item goes back to after being temporarily
+    /// shown (macOS 27).
+    ///
+    /// A hosted item's window ID is made up anew on every read, so it is
+    /// matched by tag, and an item in the collapsed overflow is often not
+    /// listed at all, so its neighbour comes from the cache's order of its
+    /// section. Failing both, it goes back just left of the hidden divider,
+    /// which is still in the hidden section.
+    private func getHostedReturnDestination(for item: MenuBarItem, in items: [MenuBarItem]) -> MoveDestination? {
+        if let index = items.firstIndex(matching: item.tag) {
+            if items.indices.contains(index + 1) {
+                return .leftOfItem(items[index + 1])
+            }
+            if items.indices.contains(index - 1) {
+                return .rightOfItem(items[index - 1])
+            }
+        }
+        if let section = itemCache.address(for: item.tag)?.section {
+            let sectionItems = itemCache.managedItems(for: section)
+            if
+                let index = sectionItems.firstIndex(matching: item.tag),
+                sectionItems.indices.contains(index + 1),
+                let next = items.first(matching: sectionItems[index + 1].tag)
+            {
+                return .leftOfItem(next)
+            }
+        }
+        return items.first(matching: .hiddenControlItem).map { .leftOfItem($0) }
     }
 
     /// The longest a shown interface may defer rehiding a temporarily
