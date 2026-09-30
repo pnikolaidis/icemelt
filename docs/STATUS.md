@@ -62,6 +62,8 @@ Snapshot for resuming work. Last updated 2026-09-25 (macOS 27 section); the rest
 
 ## macOS 27 (MenuBarAgent) — resume point, 2026-09-25
 
+**Shipped in v2026.2.0 (2026-09-30)**, PRs #46 and #49 merged to `melt`; #40 and #48 closed, #47 (wide displays) open.
+
 **Read this first if you are resuming the macOS 27 work.** Everything below is on
 branch `macos-27-recreate-spacers`, open as **PR #49**, stacked on `macos-27-hosted-menu-bar`
 (PR #46, base `melt`). Neither is merged. The build at the tip of #49 is installed in
