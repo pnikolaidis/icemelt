@@ -2232,11 +2232,16 @@ extension MenuBarItemManager {
             }
             // The overflow may still be open, from an earlier click or the
             // user's own: clicking the chevron then closes it, the item loses
-            // its slot, and the click fails until the user tries again.
-            let isLaidOut = await MenuBarItem.getMenuBarItems(option: .activeSpace)
-                .first(matching: item.tag)?.hasSlot == true
+            // its slot, and the click fails until the user tries again. An
+            // open overflow may also lack room for this item; the sections
+            // are shown below to make room.
+            let current = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+            let isLaidOut = current.first(matching: item.tag)?.hasSlot == true
+            let isOverflowOpen = current.contains { !$0.isControlItem && $0.hasSlot && !$0.isOnScreen }
             if isLaidOut {
                 logger.debug("\(item.logString, privacy: .public) is already laid out, not clicking the chevron")
+            } else if isOverflowOpen {
+                logger.debug("The overflow is open without \(item.logString, privacy: .public), not clicking the chevron")
             } else {
                 do {
                     try await postHostedClick(at: chevron.center, with: .left, for: item, leavingPointer: true)
@@ -2253,6 +2258,9 @@ extension MenuBarItemManager {
                 for (divider, _) in collapseDividers() where divider.identifier != .visible {
                     context.sections.append(divider.identifier == .hidden ? .hidden : .alwaysHidden)
                 }
+                // Let the reflow begin, or the wait sees an unchanged bar and
+                // gives up at once.
+                await eventSleep(for: .milliseconds(400))
                 _ = await waitForHostedItemOnBar(item)
             }
             let idsBeforeClick = Set(Bridging.getWindowList(option: .onScreen))
