@@ -43,10 +43,6 @@ final class MenuBarManager: ObservableObject {
     /// The panel that contains the IceMelt Bar interface.
     let iceMeltBarPanel = IceMeltBarPanel()
 
-    /// The strip that holds the hidden items the notch leaves no room for
-    /// when a section is shown in place (macOS 27).
-    let notchStripPanel = IceMeltBarPanel(isNotchStrip: true)
-
     /// The panel that contains the menu bar search interface.
     let searchPanel = MenuBarSearchPanel()
 
@@ -72,7 +68,6 @@ final class MenuBarManager: ObservableObject {
         self.appState = appState
         configureCancellables()
         iceMeltBarPanel.performSetup(with: appState)
-        notchStripPanel.performSetup(with: appState)
         searchPanel.performSetup(with: appState)
         appearanceEditorPanel.performSetup(with: appState)
         for section in sections {

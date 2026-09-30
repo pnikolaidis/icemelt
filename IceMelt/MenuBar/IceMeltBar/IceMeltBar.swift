@@ -19,17 +19,11 @@ final class IceMeltBarPanel: NSPanel {
     /// The currently displayed section.
     private(set) var currentSection: MenuBarSection.Name?
 
-    /// Whether the panel is the notch strip: shown inside the menu bar,
-    /// flush against the leading edge of the notch, with only the section's
-    /// items that didn't fit on the bar when it is shown in place (macOS 27).
-    let isNotchStrip: Bool
-
     /// Storage for internal observers.
     private var cancellables = Set<AnyCancellable>()
 
-    /// Creates a new IceMelt Bar panel, or the notch strip.
-    init(isNotchStrip: Bool = false) {
-        self.isNotchStrip = isNotchStrip
+    /// Creates a new IceMelt Bar panel.
+    init() {
         super.init(
             contentRect: .zero,
             styleMask: [.nonactivatingPanel, .fullSizeContentView, .borderless],
@@ -114,13 +108,6 @@ final class IceMeltBarPanel: NSPanel {
             return
         }
 
-        if isNotchStrip {
-            // The panel is exactly the menu bar's height, so it sits in it.
-            let notchMinX = screen.auxiliaryTopLeftArea?.maxX ?? screen.frame.midX
-            setFrameOrigin(CGPoint(x: notchMinX - frame.width, y: screen.frame.maxY - frame.height))
-            return
-        }
-
         func getOrigin(for iceMeltBarLocation: IceMeltBarLocation) -> CGPoint {
             let menuBarHeight = screen.getMenuBarHeight() ?? 0
             let originY = ((screen.frame.maxY - 1) - menuBarHeight) - frame.height
@@ -181,9 +168,7 @@ final class IceMeltBarPanel: NSPanel {
 
         // IMPORTANT: We must set the navigation state and current section
         // before updating the caches.
-        if !isNotchStrip {
-            appState.navigationState.isIceMeltBarPresented = true
-        }
+        appState.navigationState.isIceMeltBarPresented = true
         currentSection = section
 
         let cacheTask = Task(timeout: .seconds(1)) {
@@ -201,8 +186,7 @@ final class IceMeltBarPanel: NSPanel {
             appState: appState,
             colorManager: colorManager,
             screen: screen,
-            section: section,
-            isNotchStrip: isNotchStrip
+            section: section
         )
 
         updateOrigin(for: screen)
@@ -233,9 +217,7 @@ final class IceMeltBarPanel: NSPanel {
         super.close()
         contentView = nil
         currentSection = nil
-        if !isNotchStrip {
-            appState?.navigationState.isIceMeltBarPresented = false
-        }
+        appState?.navigationState.isIceMeltBarPresented = false
     }
 }
 
@@ -248,8 +230,7 @@ private final class IceMeltBarHostingView: NSHostingView<IceMeltBarContentView> 
         appState: AppState,
         colorManager: IceMeltBarColorManager,
         screen: NSScreen,
-        section: MenuBarSection.Name,
-        isNotchStrip: Bool
+        section: MenuBarSection.Name
     ) {
         let rootView = IceMeltBarContentView(
             appState: appState,
@@ -258,8 +239,7 @@ private final class IceMeltBarHostingView: NSHostingView<IceMeltBarContentView> 
             imageCache: appState.imageCache,
             menuBarManager: appState.menuBarManager,
             screen: screen,
-            section: section,
-            isNotchStrip: isNotchStrip
+            section: section
         )
         super.init(rootView: rootView)
     }
@@ -292,12 +272,9 @@ private struct IceMeltBarContentView: View {
 
     let screen: NSScreen
     let section: MenuBarSection.Name
-    let isNotchStrip: Bool
 
     private var items: [MenuBarItem] {
-        let items = itemManager.itemCache.managedItems(for: section)
-        // The strip holds only what didn't fit on the bar.
-        return isNotchStrip ? items.filter { !$0.isOnScreen } : items
+        itemManager.itemCache.managedItems(for: section)
     }
 
     private var configuration: MenuBarAppearanceConfigurationV2 {
@@ -343,39 +320,6 @@ private struct IceMeltBarContentView: View {
     }
 
     var body: some View {
-        if isNotchStrip {
-            notchStrip
-        } else {
-            bar
-        }
-    }
-
-    /// The notch strip: the items in a row the height of the menu bar, on
-    /// its color, with no border or shadow, so it reads as part of the bar.
-    @ViewBuilder
-    private var notchStrip: some View {
-        if !items.isEmpty {
-            HStack(spacing: 0) {
-                ForEach(items, id: \.windowID) { item in
-                    IceMeltBarItemView(
-                        imageCache: imageCache,
-                        itemManager: itemManager,
-                        menuBarManager: menuBarManager,
-                        item: item,
-                        section: section,
-                        menuBarHeight: screen.getMenuBarHeight()
-                    )
-                }
-            }
-            .padding(.horizontal, 8)
-            .frame(height: screen.getMenuBarHeight())
-            .background(colorManager.colorInfo.map { Color(cgColor: $0.color) } ?? Color(nsColor: .windowBackgroundColor))
-            .foregroundStyle(colorManager.colorInfo?.isBright == true ? .black : .white)
-            .fixedSize()
-        }
-    }
-
-    private var bar: some View {
         ZStack {
             content
                 .frame(height: contentHeight)
