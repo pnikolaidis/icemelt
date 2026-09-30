@@ -2230,11 +2230,20 @@ extension MenuBarItemManager {
             defer {
                 runRehideTimer()
             }
-            do {
-                try await postHostedClick(at: chevron.center, with: .left, for: item, leavingPointer: true)
-            } catch {
-                logger.error("Error expanding the overflow: \(error, privacy: .public)")
-                return
+            // The overflow may still be open, from an earlier click or the
+            // user's own: clicking the chevron then closes it, the item loses
+            // its slot, and the click fails until the user tries again.
+            let isLaidOut = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+                .first(matching: item.tag)?.hasSlot == true
+            if isLaidOut {
+                logger.debug("\(item.logString, privacy: .public) is already laid out, not clicking the chevron")
+            } else {
+                do {
+                    try await postHostedClick(at: chevron.center, with: .left, for: item, leavingPointer: true)
+                } catch {
+                    logger.error("Error expanding the overflow: \(error, privacy: .public)")
+                    return
+                }
             }
             if await !waitForHostedItemOnBar(item) {
                 // The expanded overflow has limited room, and the divider
