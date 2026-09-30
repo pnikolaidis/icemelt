@@ -2459,10 +2459,13 @@ extension MenuBarItemManager {
     /// bar; collapsed, it is stacked with the rest of the overflow.
     @available(macOS 27.0, *)
     private func collapseHostedOverflow(after context: HostedShownSectionContext) async {
+        // Open means some item other than ours is laid out left of the
+        // chevron. Not necessarily the clicked or moved item: one moved onto
+        // the bar proper leaves the overflow open behind it.
         let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
         guard
-            let item = items.first(matching: context.tag),
-            item.hasSlot, !item.isOnScreen,
+            let item = items.first(matching: context.tag) ?? items.first,
+            items.contains(where: { !$0.isControlItem && $0.hasSlot && !$0.isOnScreen }),
             let chevron = MenuBarItem.hostedOverflowChevronFrames[Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()]
         else {
             return
@@ -2554,12 +2557,15 @@ extension MenuBarItemManager {
         let itemHasSlot = items.first(matching: item.tag)?.hasSlot == true
         let targetHasSlot = items.first(matching: destination.targetItem.tag)?.hasSlot == true
         if let chevron, !(itemHasSlot && targetHasSlot) {
+            // Where the item sits, not the cache's section: a temporarily
+            // shown item is still cached in its hidden section while it
+            // sits beside the visible items.
             if
                 itemHasSlot,
-                itemCache.address(for: item.tag)?.section == .visible,
                 itemCache.address(for: destination.targetItem.tag)?.section != .visible,
-                let current = items.first(matching: item.tag),
-                let divider = items.first(matching: .hiddenControlItem), divider.hasSlot
+                let current = items.first(matching: item.tag), current.isOnScreen,
+                let divider = items.first(matching: .hiddenControlItem), divider.hasSlot,
+                current.bounds.minX >= divider.bounds.maxX
             {
                 logger.debug("Dropping \(item.logString, privacy: .public) left of the hidden divider first")
                 MouseHelpers.hideCursor()
