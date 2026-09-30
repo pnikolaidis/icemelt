@@ -139,6 +139,24 @@ alone (laptop lid closed) to learn whether the second display causes the misorde
 If it doesn't, log each spacer's slot order right after creation, against its
 position and the divider's.
 
+### Showing hidden items on the built-in display, 2026-09-30 (verified by Peter)
+
+- **Chevron click**: with the IceMelt Bar in use, a click on the system « is swallowed
+  and toggles the IceMelt Bar. Without it, the click goes through (the system lays the
+  overflow out left of the notch, right-aligned to it) and IceMelt shows the section in
+  place, so real items fill the bar just left of the chevron too. Tap:
+  `HIDEventManager.overflowChevronTap`; IceMelt's own synthetic clicks pass by pid.
+- **Every other in-place show** (droplet, hover, empty-bar click) clicks the chevron for
+  the user once the bar has reflowed, and every hide closes the overflow again
+  (`MenuBarSection.setOverflowExpandedAfterReflow`, `setHostedOverflowExpanded`).
+- Items laid out in the expanded overflow count as items, not empty menu bar space;
+  before, hovering or clicking one toggled the section and the bar jumped.
+- The overflow route re-reads the chevron until it holds still before clicking it.
+- Tried and reverted: a "notch strip" drawing copies of the leftover items left of the
+  notch. Peter wants the system's real items, which the overflow already provides.
+- macOS 27 never places a status item left of the notch outside its expanded overflow
+  (probe, 2026-09-29).
+
 ### Known limits and open items
 
 - **Not tested on two displays.** The 4K was disconnected the whole time. Spacer
