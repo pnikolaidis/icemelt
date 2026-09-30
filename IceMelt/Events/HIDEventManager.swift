@@ -48,11 +48,6 @@ final class HIDEventManager: ObservableObject {
         guard let self, isEnabled, let appState, let screen = bestScreen(appState: appState) else {
             return event
         }
-        // The notch strip sits in the menu bar, where a click would count as
-        // one on empty space, hiding the section before the item is clicked.
-        if event.window === appState.menuBarManager.notchStripPanel {
-            return event
-        }
         switch event.type {
         case .leftMouseDown:
             handleShowOnClick(appState: appState, screen: screen)
