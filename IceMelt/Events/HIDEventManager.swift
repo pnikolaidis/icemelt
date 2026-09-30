@@ -103,12 +103,15 @@ final class HIDEventManager: ObservableObject {
     /// Tap that turns a click on the system overflow chevron into showing
     /// the hidden section (macOS 27).
     ///
-    /// Clicked, the chevron lays the hidden items out over the application
-    /// menu at the leading end of the bar. Instead the click is swallowed,
-    /// mouse up included, and the hidden section toggled: in the IceMelt
-    /// Bar if it's in use, otherwise in place, just left of the chevron,
-    /// as far as the room allows. IceMelt's own clicks on the chevron, which
-    /// open the overflow to move or click a hidden item, are let through.
+    /// Clicked, the chevron lays the overflowed items out left of the notch
+    /// (or at the leading end of the bar). With the IceMelt Bar in use, the
+    /// click is swallowed, mouse up included, and the IceMelt Bar toggled
+    /// instead. Otherwise the click goes through, so the system shows its
+    /// real items, and the hidden section is toggled in place with it: the
+    /// items that fit come onto the bar just left of the chevron, and the
+    /// system's overflow holds the rest. IceMelt's own clicks on the
+    /// chevron, which open the overflow to move or click a hidden item, are
+    /// let through untouched.
     private(set) lazy var overflowChevronTap = EventTap(
         types: [.leftMouseDown, .leftMouseUp],
         location: .hidEventTap,
@@ -135,8 +138,11 @@ final class HIDEventManager: ObservableObject {
         else {
             return event
         }
-        isSwallowingChevronClick = true
         section.toggle()
+        guard appState.settings.general.useIceMeltBar else {
+            return event
+        }
+        isSwallowingChevronClick = true
         return nil
     }
 
