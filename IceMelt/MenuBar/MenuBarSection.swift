@@ -3,6 +3,7 @@
 //  IceMelt
 //
 
+import OSLog
 import SwiftUI
 
 /// A representation of a section in a menu bar.
@@ -220,14 +221,17 @@ final class MenuBarSection {
             let screen = screenForIceMeltBar,
             screen.hasNotch
         else {
+            Logger.default.notice("No notch strip for \(self.name.logString, privacy: .public): no notched screen")
             return
         }
         Task {
             // Let the bar reflow and the cache catch up first.
             try? await Task.sleep(for: .milliseconds(700))
             guard !isHidden else {
+                Logger.default.notice("Notch strip for \(self.name.logString, privacy: .public) skipped: section hidden again")
                 return
             }
+            Logger.default.notice("Showing notch strip for \(self.name.logString, privacy: .public)")
             await menuBarManager.notchStripPanel.show(section: name == .alwaysHidden ? .alwaysHidden : .hidden, on: screen)
         }
     }

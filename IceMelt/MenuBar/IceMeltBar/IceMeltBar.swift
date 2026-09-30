@@ -230,6 +230,9 @@ final class IceMeltBarPanel: NSPanel {
     }
 
     override func close() {
+        if isNotchStrip, currentSection != nil {
+            Logger.default.notice("Closing notch strip")
+        }
         super.close()
         contentView = nil
         currentSection = nil
