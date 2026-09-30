@@ -206,6 +206,30 @@ final class MenuBarSection {
 
         startRehideChecks()
         recacheAfterStateChange()
+        showNotchStrip()
+    }
+
+    /// Shows the items that don't fit beside the notch in the notch strip,
+    /// just left of the notch, rather than leaving them in the system
+    /// overflow (macOS 27). The strip shows only items still in the
+    /// overflow, and follows the cache, so it fills in as the bar reflows.
+    private func showNotchStrip() {
+        guard
+            #available(macOS 27.0, *),
+            let menuBarManager,
+            let screen = screenForIceMeltBar,
+            screen.hasNotch
+        else {
+            return
+        }
+        Task {
+            // Let the bar reflow and the cache catch up first.
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !isHidden else {
+                return
+            }
+            await menuBarManager.notchStripPanel.show(section: name == .alwaysHidden ? .alwaysHidden : .hidden, on: screen)
+        }
     }
 
     /// Hides the section.
@@ -215,6 +239,7 @@ final class MenuBarSection {
         }
 
         menuBarManager.iceMeltBarPanel.close() // Make sure IceMelt Bar is always closed.
+        menuBarManager.notchStripPanel.close()
         menuBarManager.showOnHoverAllowed = true
 
         switch name {
