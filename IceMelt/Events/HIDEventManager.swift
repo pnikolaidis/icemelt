@@ -226,9 +226,12 @@ extension HIDEventManager {
     // MARK: Handle Show On Click
 
     private func handleShowOnClick(appState: AppState, screen: NSScreen) {
+        // A click on the notch counts as one on empty space (#26). Hovering
+        // over it doesn't: the pointer crosses it on the way to the items.
         guard
             appState.settings.general.showOnClick,
-            isMouseInsideEmptyMenuBarSpace(appState: appState, screen: screen)
+            isMouseInsideEmptyMenuBarSpace(appState: appState, screen: screen) ||
+                isMouseInsideNotch(appState: appState, screen: screen)
         else {
             return
         }
