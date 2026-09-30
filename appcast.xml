@@ -3,6 +3,14 @@
     <channel>
         <title>IceMelt</title>
         <item>
+            <title>2026.3.0</title>
+            <pubDate>Wed, 30 Sep 2026 16:35:19 -0400</pubDate>
+            <sparkle:version>1130</sparkle:version>
+            <sparkle:shortVersionString>2026.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/pnikolaidis/icemelt/releases/download/v2026.3.0/IceMelt-2026.3.0.dmg" length="6248248" type="application/octet-stream" sparkle:edSignature="s0lYP2cWU1/jRQ6tlat7Oj4aS/MqsBh9dHnMUoWzMpNMJ/0H8wcvaVNwqGeX4k+iSnrQvan/WURZ/qpxVdm8DA=="/>
+        </item>
+        <item>
             <title>2026.2.2</title>
             <pubDate>Wed, 30 Sep 2026 16:21:14 -0400</pubDate>
             <sparkle:version>1129</sparkle:version>
@@ -17,14 +25,6 @@
             <sparkle:shortVersionString>2026.2.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/pnikolaidis/icemelt/releases/download/v2026.2.1/IceMelt-2026.2.1.dmg" length="6235658" type="application/octet-stream" sparkle:edSignature="9WFWUceRMmVqYsltCvypsrQkzuY7rw8mIRK6eLNOVt8DlGU0nksyjPLKtDQGLWiU9USUh37cw/+/XTpOMkigBg=="/>
-        </item>
-        <item>
-            <title>2026.2.0</title>
-            <pubDate>Wed, 30 Sep 2026 12:18:26 -0400</pubDate>
-            <sparkle:version>1127</sparkle:version>
-            <sparkle:shortVersionString>2026.2.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/pnikolaidis/icemelt/releases/download/v2026.2.0/IceMelt-2026.2.0.dmg" length="6237236" type="application/octet-stream" sparkle:edSignature="9vEZXC9anwi+fKAxDgq47QX0jhEZ6psbiaHwFm5QPupu7Y8kHe+50yN1sufKCLzZLv8aLgEN9RwSKl5dyNQcAw=="/>
         </item>
     </channel>
 </rss>
