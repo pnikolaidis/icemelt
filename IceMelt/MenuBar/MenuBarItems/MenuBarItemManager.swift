@@ -1829,10 +1829,9 @@ extension MenuBarItemManager {
     ///   - item: The item to temporarily show.
     ///   - mouseButton: The mouse button to click the item with.
     func temporarilyShow(item: MenuBarItem, clickingWith mouseButton: CGMouseButton) async {
-        if #available(macOS 27.0, *), item.isHosted {
-            await temporarilyShowHosted(item: item, clickingWith: mouseButton)
-            return
-        }
+        // On macOS 27 a hosted item is moved onto the bar beside the visible
+        // items, as before, so only it appears rather than the whole
+        // overflow; if that fails, it's clicked in the expanded overflow.
         guard let appState else {
             logger.error("Missing AppState, so not showing \(item.logString, privacy: .public)")
             return
@@ -1844,6 +1843,7 @@ extension MenuBarItemManager {
 
         guard let applicationMenuFrame = screen.getApplicationMenuFrame() else {
             logger.error("No application menu frame, so not showing \(item.logString, privacy: .public)")
+            await showHostedInOverflow(item, clickingWith: mouseButton)
             return
         }
 
@@ -1851,6 +1851,7 @@ extension MenuBarItemManager {
 
         guard let destination = getReturnDestination(for: item, in: items) else {
             logger.error("No return destination for \(item.logString, privacy: .public)")
+            await showHostedInOverflow(item, clickingWith: mouseButton)
             return
         }
 
@@ -1877,6 +1878,10 @@ extension MenuBarItemManager {
 
         guard let targetItem = items.first else {
             logger.warning("Not enough room to show \(item.logString, privacy: .public)")
+            if item.isHosted {
+                await showHostedInOverflow(item, clickingWith: mouseButton)
+                return
+            }
             let alert = NSAlert()
             alert.messageText = "Not enough room to show \"\(item.displayName)\""
             alert.runModal()
@@ -1894,6 +1899,7 @@ extension MenuBarItemManager {
             try await move(item: item, to: .leftOfItem(targetItem))
         } catch {
             logger.error("Error showing item: \(error, privacy: .public)")
+            await showHostedInOverflow(item, clickingWith: mouseButton)
             return
         }
 
@@ -1925,6 +1931,15 @@ extension MenuBarItemManager {
         context.shownInterfaceWindow = windowsAfterClick.first { window in
             window.ownerPID == item.sourcePID && !idsBeforeClick.contains(window.windowID)
         }
+    }
+
+    /// Clicks a hosted item in the expanded system overflow when it can't be
+    /// moved onto the bar (macOS 27). Does nothing for other items.
+    private func showHostedInOverflow(_ item: MenuBarItem, clickingWith mouseButton: CGMouseButton) async {
+        guard #available(macOS 27.0, *), item.isHosted else {
+            return
+        }
+        await temporarilyShowHosted(item: item, clickingWith: mouseButton)
     }
 
     /// Rehides all temporarily shown items.
