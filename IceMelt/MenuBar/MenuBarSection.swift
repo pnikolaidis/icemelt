@@ -3,6 +3,7 @@
 //  IceMelt
 //
 
+import OSLog
 import SwiftUI
 
 /// A representation of a section in a menu bar.
@@ -150,10 +151,11 @@ final class MenuBarSection {
     }
 
     /// Shows the section.
-    func show() {
+    func show(caller: String = #fileID, line: Int = #line) {
         guard let menuBarManager, isHidden else {
             return
         }
+        Logger.default.notice("Showing \(self.name.logString, privacy: .public) section (from \(caller, privacy: .public):\(line, privacy: .public))")
 
         guard controlItem.isAddedToMenuBar else {
             // The section is disabled.
@@ -206,13 +208,34 @@ final class MenuBarSection {
 
         startRehideChecks()
         recacheAfterStateChange()
+        setOverflowExpandedAfterReflow(true)
+    }
+
+    /// Opens or closes the system overflow once the bar has reflowed after
+    /// the section changes state (macOS 27), so a section shown in place
+    /// shows the items that don't fit beside the chevron too, left of the
+    /// notch, and they go away with it. A click on the chevron itself has
+    /// already done this, and then there is nothing to do.
+    private func setOverflowExpandedAfterReflow(_ expanded: Bool) {
+        guard #available(macOS 27.0, *), let appState, !useIceMeltBar, name != .alwaysHidden else {
+            return
+        }
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            // The section may have changed state again meanwhile.
+            guard isHidden != expanded else {
+                return
+            }
+            await appState.itemManager.setHostedOverflowExpanded(expanded)
+        }
     }
 
     /// Hides the section.
-    func hide() {
+    func hide(caller: String = #fileID, line: Int = #line) {
         guard let menuBarManager, !isHidden else {
             return
         }
+        Logger.default.notice("Hiding \(self.name.logString, privacy: .public) section (from \(caller, privacy: .public):\(line, privacy: .public))")
 
         menuBarManager.iceMeltBarPanel.close() // Make sure IceMelt Bar is always closed.
         menuBarManager.showOnHoverAllowed = true
@@ -228,11 +251,12 @@ final class MenuBarSection {
 
         stopRehideChecks()
         recacheAfterStateChange()
+        setOverflowExpandedAfterReflow(false)
     }
 
     /// Toggles the visibility of the section.
-    func toggle() {
-        if isHidden { show() } else { hide() }
+    func toggle(caller: String = #fileID, line: Int = #line) {
+        if isHidden { show(caller: caller, line: line) } else { hide(caller: caller, line: line) }
     }
 
     /// Re-measures the menu bar shortly after a section changes state.

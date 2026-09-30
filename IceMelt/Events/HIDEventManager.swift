@@ -96,6 +96,56 @@ final class HIDEventManager: ObservableObject {
         return event
     }
 
+    /// Whether the mouse up that ends a swallowed overflow chevron click
+    /// is still to come. See ``overflowChevronTap``.
+    private var isSwallowingChevronClick = false
+
+    /// Tap that turns a click on the system overflow chevron into showing
+    /// the hidden section (macOS 27).
+    ///
+    /// Clicked, the chevron lays the overflowed items out left of the notch
+    /// (or at the leading end of the bar). With the IceMelt Bar in use, the
+    /// click is swallowed, mouse up included, and the IceMelt Bar toggled
+    /// instead. Otherwise the click goes through, so the system shows its
+    /// real items, and the hidden section is toggled in place with it: the
+    /// items that fit come onto the bar just left of the chevron, and the
+    /// system's overflow holds the rest. IceMelt's own clicks on the
+    /// chevron, which open the overflow to move or click a hidden item, are
+    /// let through untouched.
+    private(set) lazy var overflowChevronTap = EventTap(
+        types: [.leftMouseDown, .leftMouseUp],
+        location: .hidEventTap,
+        placement: .headInsertEventTap,
+        option: .defaultTap
+    ) { [weak self] _, event in
+        guard let self else {
+            return event
+        }
+        if event.type == .leftMouseUp {
+            guard isSwallowingChevronClick else {
+                return event
+            }
+            isSwallowingChevronClick = false
+            return nil
+        }
+        guard
+            #available(macOS 27.0, *),
+            isEnabled,
+            let appState,
+            event.getIntegerValueField(.eventSourceUnixProcessID) != Int64(getpid()),
+            MenuBarItem.hostedOverflowChevronFrames.values.contains(where: { $0.contains(event.location) }),
+            let section = appState.menuBarManager.section(withName: .hidden)
+        else {
+            return event
+        }
+        section.toggle()
+        guard appState.settings.general.useIceMeltBar else {
+            return event
+        }
+        isSwallowingChevronClick = true
+        return nil
+    }
+
     /// Monitor for scroll wheel events.
     private(set) lazy var scrollWheelMonitor = EventMonitor.universal(
         for: .scrollWheel
@@ -114,6 +164,7 @@ final class HIDEventManager: ObservableObject {
         mouseUpMonitor,
         mouseDraggedMonitor,
         mouseMovedTap,
+        overflowChevronTap,
         scrollWheelMonitor,
     ]
 
@@ -535,6 +586,29 @@ extension HIDEventManager {
     /// the bounds of a menu bar item.
     func isMouseInsideMenuBarItem(appState: AppState, screen: NSScreen) -> Bool {
         guard let mouseLocation = MouseHelpers.locationCoreGraphics else {
+            return false
+        }
+        if #available(macOS 27.0, *) {
+            // Hosted items have no windows; their bounds come from the item
+            // cache. The hidden divider is not cached, so its blank span
+            // counts as empty space, as the room left of the items did before.
+            // The slots don't include the agent's spacing between items, so
+            // each is widened by it; otherwise the gaps between neighbours
+            // read as empty space.
+            // An item laid out in the expanded overflow is not on the bar
+            // proper but has a slot, and clicking it is clicking an item.
+            let items = appState.itemManager.itemCache.managedItems
+            if items.contains(where: { ($0.isOnScreen || $0.hasSlot) && $0.bounds.insetBy(dx: -8, dy: 0).contains(mouseLocation) }) {
+                return true
+            }
+            // The overflow chevron is the system's, not an item of ours, but
+            // clicking or hovering it is not "empty space" either.
+            // The chevron shifts by some 40 pt as the overflow opens and
+            // closes, and its frame is read only as the items are cached,
+            // so the band around it is generous.
+            if let chevron = MenuBarItem.hostedOverflowChevronFrames[screen.displayID] {
+                return chevron.insetBy(dx: -48, dy: 0).contains(mouseLocation)
+            }
             return false
         }
         let windowIDs = Bridging.getMenuBarWindowList(option: [.onScreen, .activeSpace, .itemsOnly])

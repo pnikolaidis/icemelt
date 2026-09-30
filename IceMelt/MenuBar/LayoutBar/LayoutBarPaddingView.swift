@@ -63,9 +63,17 @@ final class LayoutBarPaddingView: NSView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        // The container stops taking the cache while a drag is in progress;
+        // `move(item:to:)` turns it back on once the move has finished, so
+        // the row holds still until the menu bar has settled. On macOS 27 a
+        // move shows every section for its duration, and each cache pass
+        // in between would otherwise rearrange the row under the user.
+        var moveStarted = false
         defer {
-            DispatchQueue.main.async {
-                self.container.canSetArrangedViews = true
+            if !moveStarted {
+                DispatchQueue.main.async {
+                    self.container.canSetArrangedViews = true
+                }
             }
         }
 
@@ -74,6 +82,7 @@ final class LayoutBarPaddingView: NSView {
         }
 
         if let index = arrangedViews.firstIndex(of: draggingSource) {
+            moveStarted = true
             if arrangedViews.count == 1 {
                 Task {
                     // dragging source is the only view in the layout bar, so we
@@ -88,6 +97,7 @@ final class LayoutBarPaddingView: NSView {
                         move(item: draggingSource.item, to: .leftOfItem(targetItem))
                     } else {
                         Logger.default.error("No target item for layout bar drag")
+                        container.canSetArrangedViews = true
                     }
                 }
             } else if arrangedViews.indices.contains(index + 1) {
@@ -98,6 +108,8 @@ final class LayoutBarPaddingView: NSView {
                 // we have a view to the left of the dragging source
                 let targetItem = arrangedViews[index - 1].item
                 move(item: draggingSource.item, to: .rightOfItem(targetItem))
+            } else {
+                moveStarted = false
             }
         }
 
@@ -106,9 +118,13 @@ final class LayoutBarPaddingView: NSView {
 
     private func move(item: MenuBarItem, to destination: MenuBarItemManager.MoveDestination) {
         guard let appState = container.appState else {
+            container.canSetArrangedViews = true
             return
         }
         Task {
+            defer {
+                container.canSetArrangedViews = true
+            }
             try await Task.sleep(for: .milliseconds(25))
             do {
                 try await appState.itemManager.move(item: item, to: destination)
