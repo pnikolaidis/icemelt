@@ -2274,6 +2274,7 @@ extension MenuBarItemManager {
             context.shownInterfaceWindow = WindowInfo.createWindows(option: .onScreen).first { window in
                 window.ownerPID == item.sourcePID && !idsBeforeClick.contains(window.windowID)
             }
+            closeOverflowWhenInterfaceCloses(context)
             return
         }
 
@@ -2309,6 +2310,7 @@ extension MenuBarItemManager {
             context.shownInterfaceWindow = WindowInfo.createWindows(option: .onScreen).first { window in
                 window.ownerPID == item.sourcePID && !idsBeforeClick.contains(window.windowID)
             }
+            closeOverflowWhenInterfaceCloses(context)
             return
         }
 
@@ -2376,6 +2378,31 @@ extension MenuBarItemManager {
             Task {
                 await collapseHostedOverflow(after: context)
             }
+        }
+    }
+
+    /// Rehides as soon as the interface a click opened has closed, rather
+    /// than when the rehide timer fires (macOS 27).
+    ///
+    /// The open overflow lays the hidden items out from the leading end of
+    /// the bar, so it shouldn't linger once the item's menu is gone. It
+    /// can't close sooner: clicking the chevron would dismiss the menu. With
+    /// no interface window found, the rehide timer still applies.
+    @available(macOS 27.0, *)
+    private func closeOverflowWhenInterfaceCloses(_ context: HostedShownSectionContext) {
+        guard let window = context.shownInterfaceWindow else {
+            return
+        }
+        Task { [weak self] in
+            let deadline = ContinuousClock.now + Self.maxInterfaceDeferral
+            while Self.isInterfaceShowing(window), ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+            guard let self, hostedShownSectionContexts.contains(where: { $0 === context }) else {
+                return // Already rehidden.
+            }
+            logger.debug("Interface closed, rehiding")
+            await rehideTemporarilyShownItems()
         }
     }
 
