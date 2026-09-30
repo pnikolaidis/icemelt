@@ -19,7 +19,22 @@ enum AXHelpers {
     }
 
     static func element(at point: CGPoint) -> UIElement? {
-        queue.sync { try? systemWideElement.elementAtPosition(Float(point.x), Float(point.y)) }
+        // Not AXSwift's `elementAtPosition`, which force-unwraps the result:
+        // the call can report success yet return no element, which crashed
+        // IceMelt from the mouse-moved tap (2026.2.0).
+        queue.sync {
+            var result: AXUIElement?
+            let error = AXUIElementCopyElementAtPosition(
+                systemWideElement.element,
+                Float(point.x),
+                Float(point.y),
+                &result
+            )
+            guard error == .success, let result else {
+                return nil
+            }
+            return UIElement(result)
+        }
     }
 
     static func application(for runningApp: NSRunningApplication) -> Application? {
