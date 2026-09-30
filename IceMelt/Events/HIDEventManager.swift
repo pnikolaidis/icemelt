@@ -595,8 +595,10 @@ extension HIDEventManager {
             // The slots don't include the agent's spacing between items, so
             // each is widened by it; otherwise the gaps between neighbours
             // read as empty space.
+            // An item laid out in the expanded overflow is not on the bar
+            // proper but has a slot, and clicking it is clicking an item.
             let items = appState.itemManager.itemCache.managedItems
-            if items.contains(where: { $0.isOnScreen && $0.bounds.insetBy(dx: -8, dy: 0).contains(mouseLocation) }) {
+            if items.contains(where: { ($0.isOnScreen || $0.hasSlot) && $0.bounds.insetBy(dx: -8, dy: 0).contains(mouseLocation) }) {
                 return true
             }
             // The overflow chevron is the system's, not an item of ours, but
