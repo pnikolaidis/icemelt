@@ -2219,7 +2219,7 @@ extension MenuBarItemManager {
         // show the section still shows the overflow, and nothing of ours
         // toggles.
         let displayID = Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
-        if let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID] {
+        if let chevron = await settledOverflowChevronFrame(on: displayID) {
             logger.debug("Expanding the overflow for \(item.logString, privacy: .public)")
             let context = HostedShownSectionContext(sections: [], tag: item.tag)
             hostedShownSectionContexts.append(context)
@@ -2544,6 +2544,33 @@ extension MenuBarItemManager {
             await eventSleep(for: .milliseconds(300))
         }
         throw EventError.itemResponseTimeout(item)
+    }
+
+    /// Returns the overflow chevron's frame on the given display once it
+    /// has stopped moving, reading the bar afresh.
+    ///
+    /// The cached frame goes stale whenever the bar reflows: a click in the
+    /// notch strip hides the section just before it clicks the item, and
+    /// the chevron then slides back to where the section hides from, so a
+    /// click at the cached frame missed it. Gives up waiting after a second
+    /// and returns the latest frame.
+    @available(macOS 27.0, *)
+    private func settledOverflowChevronFrame(on displayID: CGDirectDisplayID) async -> CGRect? {
+        let deadline = ContinuousClock.now + .seconds(1)
+        var previous: CGRect?
+        var unchangedReads = 0
+        while true {
+            _ = await MenuBarItem.getMenuBarItems(option: .activeSpace) // Refreshes the chevron frames.
+            let current = await MainActor.run { MenuBarItem.hostedOverflowChevronFrames[displayID] }
+            unchangedReads = current == previous ? unchangedReads + 1 : 0
+            // Three equal reads over 300ms: a reflow may not have begun by the
+            // second.
+            if unchangedReads >= 2 || ContinuousClock.now >= deadline {
+                return current
+            }
+            previous = current
+            await eventSleep(for: .milliseconds(150))
+        }
     }
 
     /// Sets every divider on the bar to show its section, and returns the
