@@ -41,7 +41,9 @@ final class MenuBarFreezePanel: NSPanel {
             backing: .buffered,
             defer: false
         )
-        panel.level = .statusBar + 1
+        // Above the agent's items, and above the image the agent drags
+        // along with the pointer during a ⌘-drag, which draws over the bar.
+        panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.draggingWindow)) + 1)
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false
