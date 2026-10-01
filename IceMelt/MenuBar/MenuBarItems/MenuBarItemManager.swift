@@ -33,6 +33,16 @@ final class MenuBarItemManager: ObservableObject {
     /// Whether ``setHostedOverflowExpanded(_:)`` is running (macOS 27).
     private var isSettingHostedOverflow = false
 
+    /// Whether an item is being moved out and clicked by
+    /// ``temporarilyShow(item:clickingWith:)``. Rehiding waits meanwhile:
+    /// on macOS 27 both drive the overflow and the dividers, and run
+    /// together they undo each other's steps.
+    private var isTemporarilyShowing = false
+
+    /// Whether ``rehideTemporarilyShownItems()`` is running. Showing an
+    /// item waits meanwhile, for the same reason.
+    private var isRehidingTemporarilyShownItems = false
+
     /// Where a divider's spacer landed relative to the sections on macOS 27.
     enum HostedSpacerPlacement {
         /// Between the section the divider hides and the items that stay
@@ -1865,6 +1875,12 @@ extension MenuBarItemManager {
         // On macOS 27 a hosted item is moved onto the bar beside the visible
         // items, as before, so only it appears rather than the whole
         // overflow; if that fails, it's clicked in the expanded overflow.
+        // An item being moved back finishes first (see
+        // ``isTemporarilyShowing``).
+        let rehideDeadline = ContinuousClock.now + .seconds(20)
+        while isRehidingTemporarilyShownItems, ContinuousClock.now < rehideDeadline {
+            try? await Task.sleep(for: .milliseconds(200))
+        }
         guard let appState else {
             logger.error("Missing AppState, so not showing \(item.logString, privacy: .public)")
             return
@@ -1922,8 +1938,10 @@ extension MenuBarItemManager {
         }
 
         appState.hidEventManager.stopAll()
+        isTemporarilyShowing = true
         defer {
             appState.hidEventManager.startAll()
+            isTemporarilyShowing = false
         }
 
         logger.debug("Temporarily showing \(item.logString, privacy: .public)")
@@ -1983,6 +2001,15 @@ extension MenuBarItemManager {
         guard let appState else {
             logger.error("Missing AppState, so not rehiding")
             return
+        }
+        guard !isTemporarilyShowing, !isRehidingTemporarilyShownItems else {
+            logger.debug("Showing another item, so waiting to rehide")
+            runRehideTimer(for: 1)
+            return
+        }
+        isRehidingTemporarilyShownItems = true
+        defer {
+            isRehidingTemporarilyShownItems = false
         }
         if #available(macOS 27.0, *), !hostedShownSectionContexts.isEmpty {
             rehideHostedTemporarilyShownSections()
