@@ -1907,7 +1907,7 @@ extension MenuBarItemManager {
     @available(macOS 27.0, *)
     private func hostedDragStart(for item: MenuBarItem, at bounds: CGRect) -> CGPoint {
         let center = bounds.center
-        guard let pid = item.sourcePID, !item.isSystemExtra else {
+        guard let pid = item.sourcePID, item.tag.namespace != .menuBarAgent else {
             return center
         }
         for offset in stride(from: 0, through: 48, by: 4) {
