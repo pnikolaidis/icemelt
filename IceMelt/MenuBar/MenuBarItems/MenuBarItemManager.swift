@@ -1873,7 +1873,7 @@ extension MenuBarItemManager {
                 }
                 try await postHostedDragEvents(
                     item: item,
-                    from: current.bounds.center,
+                    from: hostedDragStart(for: item, at: current.bounds),
                     to: CGPoint(x: dropXLeftOfHiddenDivider(divider), y: divider.bounds.midY)
                 )
             }
@@ -1892,6 +1892,37 @@ extension MenuBarItemManager {
         if items.first(matching: item.tag)?.isOnScreen == true {
             throw EventError.cannotComplete
         }
+    }
+
+    /// Returns a point on the given hosted item to start a ⌘-drag from,
+    /// confirmed by asking what is under it (macOS 27).
+    ///
+    /// The agent's tree can report a slot that is stale by an item's width,
+    /// e.g. after the privacy indicator appears at the leading end, and a
+    /// drag started on the neighbour moves the neighbour or nothing. The
+    /// item's content element is vended by its own process, so the centre
+    /// and then points either side of it are probed for one whose owner is
+    /// the item's. A system extra, which the agent vends itself, is taken
+    /// at its centre.
+    @available(macOS 27.0, *)
+    private func hostedDragStart(for item: MenuBarItem, at bounds: CGRect) -> CGPoint {
+        let center = bounds.center
+        guard let pid = item.sourcePID, !item.isSystemExtra else {
+            return center
+        }
+        for offset in stride(from: 0, through: 48, by: 4) {
+            for x in Set([center.x + CGFloat(offset), center.x - CGFloat(offset)]) {
+                let point = CGPoint(x: x, y: center.y)
+                if let element = AXHelpers.element(at: point), AXHelpers.pid(for: element) == pid {
+                    if offset != 0 {
+                        logger.debug("\(item.logString, privacy: .public) found \(offset, privacy: .public)pt from its reported slot")
+                    }
+                    return point
+                }
+            }
+        }
+        logger.debug("\(item.logString, privacy: .public) not found near its reported slot, dragging from it anyway")
+        return center
     }
 
     /// The control item of the hidden section, if it is on the bar.
@@ -2274,7 +2305,9 @@ extension MenuBarItemManager {
                 """
             )
             temporarilyShownItemContexts.append(contentsOf: failedContexts.reversed())
-            runRehideTimer(for: 3)
+            // Hosted returns are ⌘-drags that jump the item and take focus
+            // from the user on every try, so a failed round waits longer.
+            runRehideTimer(for: failedContexts.contains(where: { itemCache.managedItems.first(matching: $0.tag)?.isHosted == true }) ? 20 : 3)
         }
     }
 
@@ -2844,7 +2877,7 @@ extension MenuBarItemManager {
                     defer {
                         MouseHelpers.showCursor()
                     }
-                    try await postHostedDragEvents(item: item, from: current.bounds.center, to: hostedDropPoint(for: destination, target: target))
+                    try await postHostedDragEvents(item: item, from: hostedDragStart(for: item, at: current.bounds), to: hostedDropPoint(for: destination, target: target))
                     // The agent animates the bar after a drop and reports the old
                     // slots meanwhile. Judging a stale read says "elsewhere" for a
                     // drop that took, and a retry from the old slot drags whatever
