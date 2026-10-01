@@ -1921,7 +1921,9 @@ extension MenuBarItemManager {
         guard right > left, let height = screen.getMenuBarHeight() else {
             return nil
         }
-        return CGRect(x: left, y: displayBounds.minY, width: right - left, height: height)
+        // Whole points, or the frozen image lands a fraction off and every
+        // edge under it appears to jitter.
+        return CGRect(x: left, y: displayBounds.minY, width: right - left, height: height).integral
     }
 
     /// Returns the x to drop an item at so it lands just left of the hidden
