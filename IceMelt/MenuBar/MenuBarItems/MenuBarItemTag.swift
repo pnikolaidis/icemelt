@@ -134,7 +134,7 @@ extension MenuBarItemTag {
     //
     /// An array of tags for items that can be moved, but cannot be hidden.
     static let nonHideableItems: [MenuBarItemTag] = {
-        var items = [audioVideoModule, faceTime, screenCaptureUI]
+        var items = [audioVideoModule, hostedAudioVideo, faceTime, screenCaptureUI]
         if #unavailable(macOS 15.3.2) {
             items.append(musicRecognition)
         }
@@ -191,6 +191,12 @@ extension MenuBarItemTag {
     /// The tag for the system "Control Center" menu extra, as hosted by
     /// `MenuBarAgent` in macOS 27 and later.
     static let hostedControlCenter = MenuBarItemTag(namespace: .menuBarAgent, title: "com.apple.menuextra.controlcenter")
+
+    /// The tag for the microphone and camera privacy indicator, as hosted
+    /// by `MenuBarAgent` in macOS 27 and later. The system keeps it at the
+    /// leading end of the bar whatever the order, so it can't be hidden,
+    /// can't be a move target, and doesn't bound the hiding room.
+    static let hostedAudioVideo = MenuBarItemTag(namespace: .menuBarAgent, title: "com.apple.menuextra.audiovideo")
 
     /// The tag for the system "Time Machine" item.
     static let timeMachine = if #available(macOS 26.0, *) {

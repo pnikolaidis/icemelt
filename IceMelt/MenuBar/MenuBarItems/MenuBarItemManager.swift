@@ -658,6 +658,11 @@ extension MenuBarItemManager {
                 // section is hidden; the dividers otherwise don't count.
                 return item.tag == .hiddenControlItem && identifier == .alwaysHidden ? item.bounds.minX : nil
             }
+            if !item.canBeHidden {
+                // Pinned by the system wherever it likes, e.g. the privacy
+                // indicator at the leading end: it bounds nothing.
+                return nil
+            }
             if let section = itemCache.address(for: item.tag)?.section {
                 return hiddenSections.contains(section) ? nil : item.bounds.minX
             }
@@ -1893,8 +1898,10 @@ extension MenuBarItemManager {
     }
 
     /// Returns the stretch of the active display's menu bar that a hosted
-    /// move disturbs: from the end of the application menu to the first
-    /// item of the visible section, other than `excluded` (macOS 27).
+    /// move disturbs: from the start of the application menu to the first
+    /// item of the visible section, other than `excluded` (macOS 27). The
+    /// expanded overflow replaces the application's menus, keeping only
+    /// its name, so they are covered too.
     @available(macOS 27.0, *)
     private func hostedReflowRect(in items: [MenuBarItem], excluding excluded: MenuBarItemTag? = nil) -> CGRect? {
         let displayID = Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
@@ -1902,7 +1909,7 @@ extension MenuBarItemManager {
             return nil
         }
         let displayBounds = CGDisplayBounds(displayID)
-        let left = screen.getApplicationMenuFrame()?.maxX ?? displayBounds.minX
+        let left = screen.getApplicationMenuFrame()?.minX ?? displayBounds.minX
         let dividerMaxX = items.first(matching: .hiddenControlItem).map { $0.hasSlot ? $0.bounds.maxX : nil } ?? nil
         let right = items
             .filter { $0.isOnScreen && !$0.isControlItem && !$0.tag.isHostedSpacer && $0.tag != excluded }
@@ -2716,6 +2723,12 @@ extension MenuBarItemManager {
         var items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
         let displayID = Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
         let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID]
+        logger.debug(
+            """
+            Layout before the move, chevron \(chevron.map(NSStringFromRect) ?? "none", privacy: .public): \
+            \(items.map { "\($0.tag.title) \(Int($0.bounds.minX))-\(Int($0.bounds.maxX))\($0.isOnScreen ? "" : " off")\($0.hasSlot ? "" : " noslot")" }.joined(separator: ", "), privacy: .public)
+            """
+        )
         var expandedOverflow = false
         var savedStates = [(ControlItem, ControlItem.HidingState)]()
 
