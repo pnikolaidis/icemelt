@@ -2830,7 +2830,7 @@ extension MenuBarItemManager {
                 guard !Task.isCancelled else {
                     throw EventError.cannotComplete
                 }
-                let (current, target, before) = try await waitForHostedItemsOnBar(item, destination.targetItem)
+                let (current, target, before) = try await settledHostedItems(item, destination.targetItem)
                 if hostedItemHasCorrectPosition(current, for: destination, target: target, among: before) {
                     logger.debug("Item has correct position, finished with move")
                     return
@@ -2841,8 +2841,12 @@ extension MenuBarItemManager {
                         MouseHelpers.showCursor()
                     }
                     try await postHostedDragEvents(item: item, from: current.bounds.center, to: hostedDropPoint(for: destination, target: target))
-                    await eventSleep(for: .milliseconds(400))
-                    let (after, targetAfter, all) = try await waitForHostedItemsOnBar(item, destination.targetItem)
+                    // The agent animates the bar after a drop and reports the old
+                    // slots meanwhile. Judging a stale read says "elsewhere" for a
+                    // drop that took, and a retry from the old slot drags whatever
+                    // item has moved into it (2026-10-01: three items ended up in
+                    // the visible section that way).
+                    let (after, targetAfter, all) = try await settledHostedItems(item, destination.targetItem, changedFrom: current.bounds)
                     if hostedItemHasCorrectPosition(after, for: destination, target: targetAfter, among: all) {
                         logger.debug("Attempt \(n, privacy: .public) succeeded, finished with move")
                         return
@@ -2970,6 +2974,49 @@ extension MenuBarItemManager {
         } while ContinuousClock.now < deadline
         return false
     }
+
+    /// Waits until both items have slots that hold still across two reads,
+    /// and the item's has changed from `changedFrom` if given, then returns
+    /// them. After ``hostedSettleTimeout`` the latest read is returned as
+    /// long as both have slots, or ``EventError/hostedItemNotOnBar`` is
+    /// thrown.
+    @available(macOS 27.0, *)
+    private func settledHostedItems(
+        _ item: MenuBarItem,
+        _ target: MenuBarItem,
+        changedFrom: CGRect? = nil
+    ) async throws -> (MenuBarItem, MenuBarItem, [MenuBarItem]) {
+        let deadline = ContinuousClock.now + Self.hostedSettleTimeout
+        var previous: (CGRect, CGRect)?
+        var latest: (MenuBarItem, MenuBarItem, [MenuBarItem])?
+        repeat {
+            let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+            if
+                let current = items.first(matching: item.tag), current.hasSlot,
+                let currentTarget = items.first(matching: target.tag), currentTarget.hasSlot
+            {
+                latest = (current, currentTarget, items)
+                let bounds = (current.bounds, currentTarget.bounds)
+                let changed = changedFrom.map { current.bounds != $0 } ?? true
+                if let previous, previous == bounds, changed {
+                    return (current, currentTarget, items)
+                }
+                previous = bounds
+            } else {
+                previous = nil
+            }
+            await eventSleep(for: .milliseconds(250))
+        } while ContinuousClock.now < deadline
+        if let latest {
+            logger.debug("Slots didn't settle for \(item.logString, privacy: .public), using the latest read")
+            return latest
+        }
+        throw EventError.hostedItemNotOnBar(item)
+    }
+
+    /// How long ``settledHostedItems(_:_:changedFrom:)`` waits for the
+    /// agent's layout to hold still.
+    private static let hostedSettleTimeout = Duration.seconds(3)
 
     /// Waits until both items are on the bar and returns their current
     /// slots, or throws when one is still in the overflow after
