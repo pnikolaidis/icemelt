@@ -1833,6 +1833,13 @@ extension MenuBarItemManager {
             context.hostedDividerReduction = 0
             await eventSleep(for: .milliseconds(500))
         }
+        let freeze = hostedReflowRect(
+            in: await MenuBarItem.getMenuBarItems(option: .activeSpace),
+            excluding: item.tag
+        ).flatMap(MenuBarFreezePanel.cover)
+        defer {
+            freeze?.lift()
+        }
         for attempt in 1...2 {
             let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             guard let current = items.first(matching: item.tag), current.isOnScreen else {
@@ -1883,6 +1890,29 @@ extension MenuBarItemManager {
     /// The control item of the hidden section, if it is on the bar.
     private var hiddenDivider: ControlItem? {
         appState?.menuBarManager.section(withName: .hidden)?.controlItem
+    }
+
+    /// Returns the stretch of the active display's menu bar that a hosted
+    /// move disturbs: from the end of the application menu to the first
+    /// item of the visible section, other than `excluded` (macOS 27).
+    @available(macOS 27.0, *)
+    private func hostedReflowRect(in items: [MenuBarItem], excluding excluded: MenuBarItemTag? = nil) -> CGRect? {
+        let displayID = Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
+        guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
+            return nil
+        }
+        let displayBounds = CGDisplayBounds(displayID)
+        let left = screen.getApplicationMenuFrame()?.maxX ?? displayBounds.minX
+        let dividerMaxX = items.first(matching: .hiddenControlItem).map { $0.hasSlot ? $0.bounds.maxX : nil } ?? nil
+        let right = items
+            .filter { $0.isOnScreen && !$0.isControlItem && !$0.tag.isHostedSpacer && $0.tag != excluded }
+            .filter { dividerMaxX == nil || $0.bounds.minX >= dividerMaxX! - 1 }
+            .map(\.bounds.minX)
+            .min() ?? displayBounds.maxX
+        guard right > left, let height = screen.getMenuBarHeight() else {
+            return nil
+        }
+        return CGRect(x: left, y: displayBounds.minY, width: right - left, height: height)
     }
 
     /// Returns the x to drop an item at so it lands just left of the hidden
@@ -2689,6 +2719,13 @@ extension MenuBarItemManager {
         var expandedOverflow = false
         var savedStates = [(ControlItem, ControlItem.HidingState)]()
 
+        // Hold the bar still in view until it has settled; see
+        // ``MenuBarFreezePanel``.
+        let freeze = hostedReflowRect(in: items).flatMap(MenuBarFreezePanel.cover)
+        defer {
+            freeze?.lift()
+        }
+
         // The dividers are restored and the overflow collapsed before this
         // returns, not in a detached task: a caller clicks the item next,
         // and a chevron click landing after that dismisses the item's menu.
@@ -2821,6 +2858,9 @@ extension MenuBarItemManager {
         }
         if expandedOverflow {
             await collapseHostedOverflow(after: HostedShownSectionContext(sections: [], tag: item.tag))
+        }
+        if freeze != nil {
+            await eventSleep(for: .milliseconds(400)) // The reflow after the collapse.
         }
         try result.get()
     }
