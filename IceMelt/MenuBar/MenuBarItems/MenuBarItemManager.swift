@@ -1738,6 +1738,11 @@ extension MenuBarItemManager {
         /// The destination to return the item to.
         let returnDestination: MoveDestination
 
+        /// How much the hidden divider was shortened while the item is out
+        /// (macOS 27), so the bar stays exactly full and the divider's
+        /// leading edge stays right of the notch. Restored on return.
+        var hostedDividerReduction: CGFloat = 0
+
         /// The window of the item's shown interface.
         var shownInterfaceWindow: WindowInfo?
 
@@ -1814,17 +1819,31 @@ extension MenuBarItemManager {
     /// The item ends up the hidden item nearest the visible ones; Peter
     /// chose that over the flash (2026-09-30).
     @available(macOS 27.0, *)
-    private func returnHostedItemToHiddenSection(_ item: MenuBarItem) async throws {
+    private func returnHostedItemToHiddenSection(_ item: MenuBarItem, context: TemporarilyShownItemContext) async throws {
+        // Dropped left of the divider, the item fits while the divider is
+        // shortened; restoring the divider's length over-fills the bar by
+        // the item, and it overflows as the leading item. The length is
+        // restored only once the item is left of the divider, so a retry
+        // after a missed drop keeps the drop target right of the notch.
+        func restoreDivider() async {
+            guard context.hostedDividerReduction > 0, let divider = hiddenDivider else {
+                return
+            }
+            divider.hostedLengthReduction = max(divider.hostedLengthReduction - context.hostedDividerReduction, 0)
+            context.hostedDividerReduction = 0
+            await eventSleep(for: .milliseconds(500))
+        }
         for attempt in 1...2 {
             let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             guard let current = items.first(matching: item.tag), current.isOnScreen else {
+                await restoreDivider()
                 return // Already off the bar proper.
             }
             guard let divider = items.first(matching: .hiddenControlItem), divider.hasSlot else {
                 throw EventError.cannotComplete
             }
             if current.bounds.maxX <= divider.bounds.minX {
-                return // Already left of the divider.
+                break // Already left of the divider.
             }
             logger.debug("Returning \(item.logString, privacy: .public) beside the hidden divider (attempt \(attempt, privacy: .public))")
             do {
@@ -1846,23 +1865,36 @@ extension MenuBarItemManager {
             }
             await eventSleep(for: .milliseconds(500))
         }
-        let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+        var items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+        if
+            let current = items.first(matching: item.tag), current.isOnScreen,
+            let divider = items.first(matching: .hiddenControlItem), divider.hasSlot,
+            current.bounds.maxX > divider.bounds.minX
+        {
+            throw EventError.cannotComplete
+        }
+        await restoreDivider()
+        items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
         if items.first(matching: item.tag)?.isOnScreen == true {
             throw EventError.cannotComplete
         }
     }
 
+    /// The control item of the hidden section, if it is on the bar.
+    private var hiddenDivider: ControlItem? {
+        appState?.menuBarManager.section(withName: .hidden)?.controlItem
+    }
+
     /// Returns the x to drop an item at so it lands just left of the hidden
     /// divider (macOS 27).
     ///
-    /// Just left of the divider's leading edge, unless that is under the
-    /// notch: the divider's slot can start under it, and a drop there did
-    /// nothing and once left the pointer hidden until the user switched
-    /// apps. A drop near the leading edge of a slot lands left of its item
-    /// (measured 2026-09-24), so the drop then goes just right of the
-    /// notch, inside the divider's leading half.
+    /// Just inside the divider's leading edge, where a drop lands left of
+    /// the item (measured 2026-09-24), unless that is under the notch: the
+    /// divider's slot can start under it, and a drop there did nothing and
+    /// once left the pointer hidden until the user switched apps. The drop
+    /// then goes just right of the notch, inside the divider's leading half.
     private func dropXLeftOfHiddenDivider(_ divider: MenuBarItem) -> CGFloat {
-        let x = divider.bounds.minX - 3
+        let x = divider.bounds.minX + 3
         guard
             let screen = NSScreen.screens.first(where: { $0.frame.contains(CGPoint(x: divider.bounds.midX, y: $0.frame.midY)) }),
             let leftArea = screen.auxiliaryTopLeftArea,
@@ -2033,6 +2065,19 @@ extension MenuBarItemManager {
             windowID: item.windowID,
             returnDestination: destination
         )
+        if #available(macOS 27.0, *), item.isHosted {
+            // The item on the bar proper over-fills it by its slot, and the
+            // agent lets the divider slide under the notch rather than
+            // overflow it. Shortening the divider by that slot keeps the bar
+            // exactly full, so nothing hidden flows in and the divider's
+            // leading edge, the return drop target, stays right of the notch.
+            let shown = await MenuBarItem.getMenuBarItems(option: .activeSpace).first(matching: item.tag)
+            if let width = shown?.bounds.width, width > 0, let divider = hiddenDivider {
+                divider.hostedLengthReduction += width
+                context.hostedDividerReduction = width
+                await eventSleep(for: .milliseconds(300))
+            }
+        }
         temporarilyShownItemContexts.append(context)
 
         rehideTimer?.invalidate()
@@ -2154,7 +2199,7 @@ extension MenuBarItemManager {
             }
             do {
                 if #available(macOS 27.0, *), item.isHosted {
-                    try await returnHostedItemToHiddenSection(item)
+                    try await returnHostedItemToHiddenSection(item, context: context)
                 } else {
                     try await move(item: item, to: context.returnDestination)
                 }
@@ -2643,131 +2688,141 @@ extension MenuBarItemManager {
         let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID]
         var expandedOverflow = false
         var savedStates = [(ControlItem, ControlItem.HidingState)]()
-        defer {
-            for (divider, state) in savedStates where divider.state != state {
-                divider.state = state
+
+        // The dividers are restored and the overflow collapsed before this
+        // returns, not in a detached task: a caller clicks the item next,
+        // and a chevron click landing after that dismisses the item's menu.
+        func drag() async throws {
+            try await eventSemaphore.waitUnlessCancelled()
+            defer {
+                eventSemaphore.signal()
             }
-            if expandedOverflow {
-                Task {
-                    await self.collapseHostedOverflow(after: HostedShownSectionContext(sections: [], tag: item.tag))
+
+            let mouseLocation = try getMouseLocation()
+            defer {
+                MouseHelpers.warpCursor(to: mouseLocation)
+            }
+
+            let itemHasSlot = items.first(matching: item.tag)?.hasSlot == true
+            let targetHasSlot = items.first(matching: destination.targetItem.tag)?.hasSlot == true
+            if let chevron, !(itemHasSlot && targetHasSlot) {
+                // Where the item sits, not the cache's section: a temporarily
+                // shown item is still cached in its hidden section while it
+                // sits beside the visible items.
+                if
+                    itemHasSlot,
+                    itemCache.address(for: destination.targetItem.tag)?.section != .visible,
+                    let current = items.first(matching: item.tag), current.isOnScreen,
+                    let divider = items.first(matching: .hiddenControlItem), divider.hasSlot,
+                    current.bounds.minX >= divider.bounds.maxX
+                {
+                    logger.debug("Dropping \(item.logString, privacy: .public) left of the hidden divider first")
+                    do {
+                        // Shown again even if the drag throws, or the pointer
+                        // stays hidden.
+                        MouseHelpers.hideCursor()
+                        defer {
+                            MouseHelpers.showCursor()
+                        }
+                        try await postHostedDragEvents(
+                            item: item,
+                            from: current.bounds.center,
+                            to: CGPoint(x: dropXLeftOfHiddenDivider(divider), y: divider.bounds.midY)
+                        )
+                    }
+                    await eventSleep(for: .milliseconds(400))
+                    items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
                 }
+                // The drop above reflows the bar and moves the chevron, so its
+                // frame is read again; a click at the old frame lands on whatever
+                // item is there now.
+                _ = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+                if let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID] {
+                    logger.debug(
+                        """
+                        Expanding the overflow to move \(item.logString, privacy: .public) \
+                        by clicking \(NSStringFromPoint(chevron.center), privacy: .public)
+                        """
+                    )
+                    try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item, leavingPointer: true)
+                    expandedOverflow = true
+                }
+                // The expanded overflow has room for about the area left of the
+                // notch, and a divider filling the bar is laid out in it too,
+                // taking that room from the items (six of sixteen got no slot
+                // on 2026-09-25). If either item got none, the dividers are
+                // collapsed for the duration and the overflow reopened, since
+                // the reflow closes it. That reflows the bar twice, so it is
+                // done only when needed.
+                if try await !hostedItemsHaveSlots(item, destination.targetItem, within: .seconds(1)) {
+                    logger.debug("Collapsing the dividers to make room in the overflow")
+                    savedStates = collapseDividers()
+                    await eventSleep(for: .milliseconds(400))
+                    // The chevron moves as the bar reflows, and the reflow may or
+                    // may not have closed the overflow: click it only once it holds
+                    // still, and only if the overflow is closed, or the click
+                    // misses or shuts it.
+                    if let chevron = await settledOverflowChevronFrame(on: displayID) {
+                        let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+                        let isOpen = items.contains { !$0.isControlItem && $0.hasSlot && !$0.isOnScreen }
+                        if !isOpen {
+                            try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item, leavingPointer: true)
+                        }
+                        expandedOverflow = true
+                    }
+                }
+            } else if !(itemHasSlot && targetHasSlot) {
+                savedStates = collapseDividers()
             }
-        }
 
-        try await eventSemaphore.waitUnlessCancelled()
-        defer {
-            eventSemaphore.signal()
-        }
-
-        let mouseLocation = try getMouseLocation()
-        defer {
-            MouseHelpers.warpCursor(to: mouseLocation)
-        }
-
-        let itemHasSlot = items.first(matching: item.tag)?.hasSlot == true
-        let targetHasSlot = items.first(matching: destination.targetItem.tag)?.hasSlot == true
-        if let chevron, !(itemHasSlot && targetHasSlot) {
-            // Where the item sits, not the cache's section: a temporarily
-            // shown item is still cached in its hidden section while it
-            // sits beside the visible items.
-            if
-                itemHasSlot,
-                itemCache.address(for: destination.targetItem.tag)?.section != .visible,
-                let current = items.first(matching: item.tag), current.isOnScreen,
-                let divider = items.first(matching: .hiddenControlItem), divider.hasSlot,
-                current.bounds.minX >= divider.bounds.maxX
-            {
-                logger.debug("Dropping \(item.logString, privacy: .public) left of the hidden divider first")
+            let maxAttempts = 3
+            for n in 1...maxAttempts {
+                guard !Task.isCancelled else {
+                    throw EventError.cannotComplete
+                }
+                let (current, target, before) = try await waitForHostedItemsOnBar(item, destination.targetItem)
+                if hostedItemHasCorrectPosition(current, for: destination, target: target, among: before) {
+                    logger.debug("Item has correct position, finished with move")
+                    return
+                }
                 do {
-                    // Shown again even if the drag throws, or the pointer
-                    // stays hidden.
                     MouseHelpers.hideCursor()
                     defer {
                         MouseHelpers.showCursor()
                     }
-                    try await postHostedDragEvents(
-                        item: item,
-                        from: current.bounds.center,
-                        to: CGPoint(x: dropXLeftOfHiddenDivider(divider), y: divider.bounds.midY)
-                    )
-                }
-                await eventSleep(for: .milliseconds(400))
-                items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
-            }
-            // The drop above reflows the bar and moves the chevron, so its
-            // frame is read again; a click at the old frame lands on whatever
-            // item is there now.
-            _ = await MenuBarItem.getMenuBarItems(option: .activeSpace)
-            if let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID] {
-                logger.debug(
-                    """
-                    Expanding the overflow to move \(item.logString, privacy: .public) \
-                    by clicking \(NSStringFromPoint(chevron.center), privacy: .public)
-                    """
-                )
-                try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item, leavingPointer: true)
-                expandedOverflow = true
-            }
-            // The expanded overflow has room for about the area left of the
-            // notch, and a divider filling the bar is laid out in it too,
-            // taking that room from the items (six of sixteen got no slot
-            // on 2026-09-25). If either item got none, the dividers are
-            // collapsed for the duration and the overflow reopened, since
-            // the reflow closes it. That reflows the bar twice, so it is
-            // done only when needed.
-            if try await !hostedItemsHaveSlots(item, destination.targetItem, within: .seconds(1)) {
-                logger.debug("Collapsing the dividers to make room in the overflow")
-                savedStates = collapseDividers()
-                await eventSleep(for: .milliseconds(400))
-                // The chevron moves as the bar reflows, and the reflow may or
-                // may not have closed the overflow: click it only once it holds
-                // still, and only if the overflow is closed, or the click
-                // misses or shuts it.
-                if let chevron = await settledOverflowChevronFrame(on: displayID) {
-                    let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
-                    let isOpen = items.contains { !$0.isControlItem && $0.hasSlot && !$0.isOnScreen }
-                    if !isOpen {
-                        try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item, leavingPointer: true)
+                    try await postHostedDragEvents(item: item, from: current.bounds.center, to: hostedDropPoint(for: destination, target: target))
+                    await eventSleep(for: .milliseconds(400))
+                    let (after, targetAfter, all) = try await waitForHostedItemsOnBar(item, destination.targetItem)
+                    if hostedItemHasCorrectPosition(after, for: destination, target: targetAfter, among: all) {
+                        logger.debug("Attempt \(n, privacy: .public) succeeded, finished with move")
+                        return
                     }
-                    expandedOverflow = true
+                    logger.debug("Attempt \(n, privacy: .public) left the item elsewhere")
+                } catch {
+                    logger.debug("Attempt \(n, privacy: .public) failed: \(error, privacy: .public)")
+                    if n == maxAttempts {
+                        throw error
+                    }
                 }
+                await eventSleep(for: .milliseconds(300))
             }
-        } else if !(itemHasSlot && targetHasSlot) {
-            savedStates = collapseDividers()
+            throw EventError.itemResponseTimeout(item)
         }
 
-        let maxAttempts = 3
-        for n in 1...maxAttempts {
-            guard !Task.isCancelled else {
-                throw EventError.cannotComplete
-            }
-            let (current, target, before) = try await waitForHostedItemsOnBar(item, destination.targetItem)
-            if hostedItemHasCorrectPosition(current, for: destination, target: target, among: before) {
-                logger.debug("Item has correct position, finished with move")
-                return
-            }
-            do {
-                MouseHelpers.hideCursor()
-                defer {
-                    MouseHelpers.showCursor()
-                }
-                try await postHostedDragEvents(item: item, from: current.bounds.center, to: hostedDropPoint(for: destination, target: target))
-                await eventSleep(for: .milliseconds(400))
-                let (after, targetAfter, all) = try await waitForHostedItemsOnBar(item, destination.targetItem)
-                if hostedItemHasCorrectPosition(after, for: destination, target: targetAfter, among: all) {
-                    logger.debug("Attempt \(n, privacy: .public) succeeded, finished with move")
-                    return
-                }
-                logger.debug("Attempt \(n, privacy: .public) left the item elsewhere")
-            } catch {
-                logger.debug("Attempt \(n, privacy: .public) failed: \(error, privacy: .public)")
-                if n == maxAttempts {
-                    throw error
-                }
-            }
-            await eventSleep(for: .milliseconds(300))
+        let result: Result<Void, Error>
+        do {
+            try await drag()
+            result = .success(())
+        } catch {
+            result = .failure(error)
         }
-        throw EventError.itemResponseTimeout(item)
+        for (divider, state) in savedStates where divider.state != state {
+            divider.state = state
+        }
+        if expandedOverflow {
+            await collapseHostedOverflow(after: HostedShownSectionContext(sections: [], tag: item.tag))
+        }
+        try result.get()
     }
 
     /// Opens or closes the system overflow on the active display, if it
@@ -2909,6 +2964,12 @@ extension MenuBarItemManager {
         target: MenuBarItem,
         among items: [MenuBarItem]
     ) -> Bool {
+        // An item laid out in the expanded overflow, left of the notch, is
+        // left of everything on the bar proper by x alone, so the sides are
+        // compared first.
+        guard item.isOnScreen == target.isOnScreen else {
+            return false
+        }
         let (leading, trailing) = switch destination {
         case .leftOfItem: (item, target)
         case .rightOfItem: (target, item)

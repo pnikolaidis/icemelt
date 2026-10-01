@@ -227,6 +227,18 @@ final class ControlItem {
     /// as last measured by the item manager.
     private var hostedHidingWidth: CGFloat?
 
+    /// How much shorter than the measured room the divider is kept, on
+    /// macOS 27, while a hidden item is temporarily shown on the bar: the
+    /// item's slot, so the bar stays exactly full. See
+    /// `MenuBarItemManager.temporarilyShow(item:clickingWith:)`.
+    var hostedLengthReduction: CGFloat = 0 {
+        didSet {
+            if #available(macOS 27.0, *), isSectionDivider, state == .hideSection, isAddedToMenuBar {
+                updateStatusItemVisibility(true)
+            }
+        }
+    }
+
     /// A blank status item that fills room the divider can't cover on its
     /// own, on macOS 27, with the state of the search for its place beside
     /// the divider. See ``hostedHidingLengths`` and ``updateSpacers(lengths:)``.
@@ -298,7 +310,9 @@ final class ControlItem {
         let slot = cap + padding
         let count = min(max(Int((width / slot).rounded(.up)), 1), Lengths.maxHidingItems)
         let length = min(max(width / CGFloat(count) - padding, 0), cap)
-        return Array(repeating: length, count: count)
+        var lengths = Array(repeating: length, count: count)
+        lengths[0] = max(length - hostedLengthReduction, 0)
+        return lengths
     }
 
     /// A Boolean value that indicates whether the control item serves as
