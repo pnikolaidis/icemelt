@@ -62,6 +62,12 @@ Snapshot for resuming work. Last updated 2026-09-25 (macOS 27 section); the rest
 
 ## macOS 27 (MenuBarAgent) — resume point, 2026-09-25
 
+**Releases since (2026-09-30):** v2026.2.1 (accessibility hit-test crash, #50), v2026.2.2
+(IceMelt Bar clicks on hidden items, #51), v2026.3.0 (click the notch, #26). Open: #47
+(wide displays), #52 (overflow lays items out from the left, not against the notch), #34.
+**In review:** draft PR from `icebar-single-item`, which shows only the clicked item, as on
+macOS 26. Write-up: `docs/ICEBAR-SINGLE-ITEM.md` on that branch.
+
 **Shipped in v2026.2.0 (2026-09-30)**, PRs #46 and #49 merged to `melt`; #40 and #48 closed, #47 (wide displays) open.
 
 **Read this first if you are resuming the macOS 27 work.** Everything below is on
