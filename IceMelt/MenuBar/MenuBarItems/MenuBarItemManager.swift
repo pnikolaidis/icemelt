@@ -1804,6 +1804,54 @@ extension MenuBarItemManager {
         return nil
     }
 
+    /// Moves a temporarily shown hosted item back into the hidden section by
+    /// dropping it just left of the hidden divider (macOS 27).
+    ///
+    /// Not to its old place: reaching that means opening the system
+    /// overflow, which lays every hidden item out at the leading end of the
+    /// bar, a flash per item. Dropped beside the divider, the item is in the
+    /// hidden section at once and overflows with it, so nothing else shows.
+    /// The item ends up the hidden item nearest the visible ones; Peter
+    /// chose that over the flash (2026-09-30).
+    @available(macOS 27.0, *)
+    private func returnHostedItemToHiddenSection(_ item: MenuBarItem) async throws {
+        for attempt in 1...2 {
+            let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+            guard let current = items.first(matching: item.tag), current.isOnScreen else {
+                return // Already off the bar proper.
+            }
+            guard let divider = items.first(matching: .hiddenControlItem), divider.hasSlot else {
+                throw EventError.cannotComplete
+            }
+            if current.bounds.maxX <= divider.bounds.minX {
+                return // Already left of the divider.
+            }
+            logger.debug("Returning \(item.logString, privacy: .public) beside the hidden divider (attempt \(attempt, privacy: .public))")
+            do {
+                try await eventSemaphore.waitUnlessCancelled()
+                defer {
+                    eventSemaphore.signal()
+                }
+                let mouseLocation = try getMouseLocation()
+                MouseHelpers.hideCursor()
+                defer {
+                    MouseHelpers.showCursor()
+                    MouseHelpers.warpCursor(to: mouseLocation)
+                }
+                try await postHostedDragEvents(
+                    item: item,
+                    from: current.bounds.center,
+                    to: CGPoint(x: dropXLeftOfHiddenDivider(divider), y: divider.bounds.midY)
+                )
+            }
+            await eventSleep(for: .milliseconds(500))
+        }
+        let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+        if items.first(matching: item.tag)?.isOnScreen == true {
+            throw EventError.cannotComplete
+        }
+    }
+
     /// Returns the x to drop an item at so it lands just left of the hidden
     /// divider (macOS 27).
     ///
@@ -2105,7 +2153,11 @@ extension MenuBarItemManager {
                 continue
             }
             do {
-                try await move(item: item, to: context.returnDestination)
+                if #available(macOS 27.0, *), item.isHosted {
+                    try await returnHostedItemToHiddenSection(item)
+                } else {
+                    try await move(item: item, to: context.returnDestination)
+                }
             } catch {
                 context.rehideAttempts += 1
                 logger.warning(
