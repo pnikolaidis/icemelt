@@ -1814,22 +1814,26 @@ extension MenuBarItemManager {
         return nil
     }
 
-    /// Moves a temporarily shown hosted item back into the hidden section by
-    /// dropping it just left of the hidden divider (macOS 27).
+    /// Moves a temporarily shown hosted item back into the hidden section
+    /// by ⌘-dragging the hidden divider to the right of it (macOS 27).
     ///
-    /// Not to its old place: reaching that means opening the system
-    /// overflow, which lays every hidden item out at the leading end of the
-    /// bar, a flash per item. Dropped beside the divider, the item is in the
-    /// hidden section at once and overflows with it, so nothing else shows.
-    /// The item ends up the hidden item nearest the visible ones; Peter
-    /// chose that over the flash (2026-09-30).
+    /// Not the item to its old place: reaching that means opening the
+    /// system overflow, which lays every hidden item out at the leading
+    /// end of the bar, a flash per item. Nor the item to just left of the
+    /// divider: the divider's leading edge sits at the overflow boundary,
+    /// beside the notch, where a drop takes about one time in four
+    /// (2026-10-01). The divider is IceMelt's own item, wholly on the bar
+    /// proper, and a drag from there to just inside the item's trailing
+    /// edge lands it right of the item. The item is then the last of the
+    /// hidden section and overflows once the divider's length is restored.
+    /// The hidden section floods the bar while the divider is lifted, so
+    /// the stretch is covered by a freeze panel throughout.
     @available(macOS 27.0, *)
     private func returnHostedItemToHiddenSection(_ item: MenuBarItem, context: TemporarilyShownItemContext) async throws {
-        // Dropped left of the divider, the item fits while the divider is
-        // shortened; restoring the divider's length over-fills the bar by
-        // the item, and it overflows as the leading item. The length is
-        // restored only once the item is left of the divider, so a retry
-        // after a missed drop keeps the drop target right of the notch.
+        // Restoring the divider's length over-fills the bar by the item,
+        // which overflows as the last item left of the divider. Restored
+        // only once the item is left of the divider, so a retry after a
+        // missed drop starts from the same layout.
         func restoreDivider() async {
             guard context.hostedDividerReduction > 0, let divider = hiddenDivider else {
                 return
@@ -1840,10 +1844,14 @@ extension MenuBarItemManager {
             // panel stays up until it has.
             await eventSleep(for: .milliseconds(1_000))
         }
-        let freeze = hostedReflowRect(
-            in: await MenuBarItem.getMenuBarItems(option: .activeSpace),
-            excluding: item.tag
-        ).flatMap(MenuBarFreezePanel.cover)
+        let initial = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+        logger.debug(
+            """
+            Layout before the return: \
+            \(initial.map { "\($0.tag.title) \(Int($0.bounds.minX))-\(Int($0.bounds.maxX))\($0.isOnScreen ? "" : " off")\($0.hasSlot ? "" : " noslot")" }.joined(separator: ", "), privacy: .public)
+            """
+        )
+        let freeze = hostedReflowRect(in: initial, excluding: item.tag).flatMap(MenuBarFreezePanel.cover)
         defer {
             freeze?.lift()
         }
@@ -1853,13 +1861,13 @@ extension MenuBarItemManager {
                 await restoreDivider()
                 return // Already off the bar proper.
             }
-            guard let divider = items.first(matching: .hiddenControlItem), divider.hasSlot else {
+            guard let divider = items.first(matching: .hiddenControlItem), divider.hasSlot, divider.isOnScreen else {
                 throw EventError.cannotComplete
             }
             if current.bounds.maxX <= divider.bounds.minX {
                 break // Already left of the divider.
             }
-            logger.debug("Returning \(item.logString, privacy: .public) beside the hidden divider (attempt \(attempt, privacy: .public))")
+            logger.debug("Returning \(item.logString, privacy: .public) by moving the hidden divider right of it (attempt \(attempt, privacy: .public))")
             do {
                 try await eventSemaphore.waitUnlessCancelled()
                 defer {
@@ -1872,12 +1880,12 @@ extension MenuBarItemManager {
                     MouseHelpers.warpCursor(to: mouseLocation)
                 }
                 try await postHostedDragEvents(
-                    item: item,
-                    from: hostedDragStart(for: item, at: current.bounds),
-                    to: CGPoint(x: dropXLeftOfHiddenDivider(divider), y: divider.bounds.midY)
+                    item: divider,
+                    from: hostedDragStart(for: divider, at: divider.bounds),
+                    to: CGPoint(x: current.bounds.maxX - 3, y: current.bounds.midY)
                 )
             }
-            await eventSleep(for: .milliseconds(500))
+            await eventSleep(for: .milliseconds(800))
         }
         var items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
         if
