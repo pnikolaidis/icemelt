@@ -1804,6 +1804,32 @@ extension MenuBarItemManager {
         return nil
     }
 
+    /// Returns the x to drop an item at so it lands just left of the hidden
+    /// divider (macOS 27).
+    ///
+    /// Just left of the divider's leading edge, unless that is under the
+    /// notch: the divider's slot can start under it, and a drop there did
+    /// nothing and once left the pointer hidden until the user switched
+    /// apps. A drop near the leading edge of a slot lands left of its item
+    /// (measured 2026-09-24), so the drop then goes just right of the
+    /// notch, inside the divider's leading half.
+    private func dropXLeftOfHiddenDivider(_ divider: MenuBarItem) -> CGFloat {
+        let x = divider.bounds.minX - 3
+        guard
+            let screen = NSScreen.screens.first(where: { $0.frame.contains(CGPoint(x: divider.bounds.midX, y: $0.frame.midY)) }),
+            let leftArea = screen.auxiliaryTopLeftArea,
+            let rightArea = screen.auxiliaryTopRightArea
+        else {
+            return x
+        }
+        // AppKit and the agent agree on x for the screen at the origin.
+        let notch = (screen.frame.minX + leftArea.maxX)...(screen.frame.minX + rightArea.minX)
+        guard notch.contains(x) else {
+            return x
+        }
+        return min(notch.upperBound + 3, divider.bounds.midX)
+    }
+
     /// Returns where a hosted item goes back to after being temporarily
     /// shown (macOS 27).
     ///
@@ -2610,7 +2636,7 @@ extension MenuBarItemManager {
                     try await postHostedDragEvents(
                         item: item,
                         from: current.bounds.center,
-                        to: CGPoint(x: divider.bounds.minX - 3, y: divider.bounds.midY)
+                        to: CGPoint(x: dropXLeftOfHiddenDivider(divider), y: divider.bounds.midY)
                     )
                 }
                 await eventSleep(for: .milliseconds(400))
