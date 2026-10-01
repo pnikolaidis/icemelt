@@ -1836,7 +1836,9 @@ extension MenuBarItemManager {
             }
             divider.hostedLengthReduction = max(divider.hostedLengthReduction - context.hostedDividerReduction, 0)
             context.hostedDividerReduction = 0
-            await eventSleep(for: .milliseconds(500))
+            // The item slides under the notch as it overflows; the freeze
+            // panel stays up until it has.
+            await eventSleep(for: .milliseconds(1_000))
         }
         let freeze = hostedReflowRect(
             in: await MenuBarItem.getMenuBarItems(option: .activeSpace),
@@ -2877,7 +2879,8 @@ extension MenuBarItemManager {
             await collapseHostedOverflow(after: HostedShownSectionContext(sections: [], tag: item.tag))
         }
         if freeze != nil {
-            await eventSleep(for: .milliseconds(400)) // The reflow after the collapse.
+            // The agent fades the collapsed overflow out over most of a second.
+            await eventSleep(for: .milliseconds(1_000))
         }
         try result.get()
     }
