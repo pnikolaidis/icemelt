@@ -1930,10 +1930,11 @@ extension MenuBarItemManager {
     /// divider (macOS 27).
     ///
     /// Just inside the divider's leading edge, where a drop lands left of
-    /// the item (measured 2026-09-24), unless that is under the notch: the
-    /// divider's slot can start under it, and a drop there did nothing and
-    /// once left the pointer hidden until the user switched apps. The drop
-    /// then goes just right of the notch, inside the divider's leading half.
+    /// the item (measured 2026-09-24), unless that is under or beside the
+    /// notch: the divider's slot can start under it, and a drop there did
+    /// nothing and once left the pointer hidden until the user switched
+    /// apps. The drop then goes well right of the notch, inside the
+    /// divider's leading half.
     private func dropXLeftOfHiddenDivider(_ divider: MenuBarItem) -> CGFloat {
         let x = divider.bounds.minX + 3
         guard
@@ -1944,11 +1945,10 @@ extension MenuBarItemManager {
             return x
         }
         // AppKit and the agent agree on x for the screen at the origin.
+        // A drop within about 20pt of the notch's edge takes only sometimes
+        // (1013 took once in thirteen, 1023 took; 2026-09-30 and 2026-10-01).
         let notch = (screen.frame.minX + leftArea.maxX)...(screen.frame.minX + rightArea.minX)
-        guard notch.contains(x) else {
-            return x
-        }
-        return min(notch.upperBound + 3, divider.bounds.midX)
+        return min(max(x, notch.upperBound + 24), divider.bounds.midX)
     }
 
     /// Returns where a hosted item goes back to after being temporarily
