@@ -1879,9 +1879,18 @@ extension MenuBarItemManager {
                     MouseHelpers.showCursor()
                     MouseHelpers.warpCursor(to: mouseLocation)
                 }
+                // The divider's own window says where its content is: the
+                // agent's slot for it is wider than the content, and a press
+                // on the blank part of the slot drags nothing (2026-10-02).
+                let start: CGPoint
+                if let frame = hiddenDivider?.window?.frame, let main = NSScreen.screens.first, frame.width > 0 {
+                    start = CGPoint(x: frame.midX, y: main.frame.maxY - frame.midY)
+                } else {
+                    start = hostedDragStart(for: divider, at: divider.bounds)
+                }
                 try await postHostedDragEvents(
                     item: divider,
-                    from: hostedDragStart(for: divider, at: divider.bounds),
+                    from: start,
                     to: CGPoint(x: current.bounds.maxX - 3, y: current.bounds.midY)
                 )
             }
@@ -2305,6 +2314,10 @@ extension MenuBarItemManager {
 
         if failedContexts.isEmpty {
             logger.debug("All items were successfully rehidden")
+            if #available(macOS 27.0, *), temporarilyShownItemContexts.isEmpty, let divider = hiddenDivider, divider.hostedLengthReduction != 0 {
+                // Nothing is out, so nothing should be shortening the divider.
+                divider.hostedLengthReduction = 0
+            }
         } else {
             logger.error(
                 """
