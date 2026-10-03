@@ -140,6 +140,9 @@ final class ControlItem {
 
             self.statusItem = NSStatusBar.system.statusItem(withLength: 0)
             self.statusItem.autosaveName = controlItem.identifier.rawValue
+            // Names the slot in MenuBarAgent's tree on every display
+            // (macOS 27); see `HostedItemReader`.
+            self.statusItem.button?.setAccessibilityIdentifier(controlItem.identifier.rawValue)
 
             if let button = statusItem.button {
                 // This could break in a new macOS release, but we need this constraint in order to
@@ -690,6 +693,7 @@ final class ControlItem {
         // An item whose button is never touched gets a zero-width slot.
         statusItem.button?.title = ""
         statusItem.button?.appearsDisabled = true
+        statusItem.button?.setAccessibilityIdentifier(tag.title)
         Self.liveSpacers[tag] = statusItem
         return Spacer(statusItem: statusItem, tag: tag, position: position)
     }

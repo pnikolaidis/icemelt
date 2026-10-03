@@ -462,6 +462,15 @@ extension MenuBarItem {
                         return nil
                     }
                     tag = MenuBarItemTag(namespace: .menuBarAgent, title: identifier)
+                } else if item.sourcePID == ownPID, let identifier = item.identifier {
+                    // Named by its button's accessibility identifier, which
+                    // holds on every display; a status window has a frame on
+                    // one display only.
+                    let named = MenuBarItemTag(namespace: .iceMelt, title: identifier)
+                    if named.isHostedSpacer, !includingSpacers {
+                        return nil
+                    }
+                    tag = named
                 } else if item.sourcePID == ownPID {
                     // Match the slot to the nearest of our items by position. A
                     // slot of ours that matches none is skipped: a spacer when
