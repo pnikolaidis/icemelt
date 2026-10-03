@@ -111,3 +111,46 @@ overflow route (`temporarilyShowHosted`).
   `isRehidingTemporarilyShownItems`: serialization.
 - Debug logs: run `log stream --level debug --predicate 'process == "IceMelt"'` while
   testing. Debug lines aren't persisted otherwise.
+
+## Update 2026-10-03 (branch `icebar-single-item-fixes`, stacked on this one)
+
+**Built-in display: the single-item show works cleanly.** One drag out, one drag back,
+no flash left of the notch, no slide. What it took, each a measured cause:
+
+- The move was judged done without a drag: the position check compared x alone, and
+  an item laid out in the expanded overflow, left of the notch, is left of everything.
+  Now both items must be on the same side.
+- The collapse ran in a detached task and its chevron click dismissed the item's menu.
+  Now `moveHosted` restores the dividers and collapses before returning.
+- The agent keeps reporting old slots for ~1 s after a drop. Judged then, a drop that
+  took read as "elsewhere", and the retry dragged whatever item had moved into the old
+  slot (three items ended up in the visible section). Reads now wait for two identical
+  reads with the item's slot changed (`settledHostedItems`).
+- The privacy indicator MenuBarAgent hosts (`com.apple.menuextra.audiovideo`) is pinned
+  at the leading end whatever the order. Cached as visible it bounded the room at 41pt
+  and, as a move target, the drop beside it landed left of the divider. Non-hideable now.
+- The return never lands reliably at the divider's leading edge (overflow boundary,
+  beside the notch; one in four). It now ⌘-drags the **divider** to just inside the
+  item's trailing edge instead: bar proper to bar proper, every time so far. The drag
+  must start on the divider's own window, not its wider slot.
+- The reflows are hidden by `MenuBarFreezePanel`: a capture of the bar from the app
+  menu to the first visible item, shown above the agent's items and its drag image
+  (dragging window level + 1), lifted ~1 s after the collapse or the overflow.
+- A hosted return that fails waits 20 s, not 3, before retrying (each try is a hidden
+  pointer and a focus change).
+
+**Two displays (4K + laptop, 2026-10-03): hiding still fails on the 4K (#47), and the
+cause is now visible.** Own slots are named by accessibility identifier on every
+display (this was the "unmatched own slots" mystery: windows exist on one display).
+With them named, the spacer verdicts are right, and they say the spacers land *left of
+the hidden items* at every preferred position tried, 135936 down to 1.7: the position
+bisection cannot place them. Layout seen: `Spacer0 730-1420, hidden items 1428-1877,
+Spacer1 1877-2567, two hidden 2567-2635, divider 2635-3325`.
+
+**Proposed next step for #47:** stop bisecting positions; ⌘-drag each spacer to just
+left of the divider once (drop at `divider.minX + 3`, bar proper, no notch on the 4K),
+under the freeze panel, as the return now does for the divider.
+
+Debug: `log stream --predicate 'process == "IceMelt" AND subsystem ==
+"com.pnikolaidis.icemelt"' --level debug` logs each display's layout when it changes,
+each spacer's slot and verdict, and the layout before every move and return.
