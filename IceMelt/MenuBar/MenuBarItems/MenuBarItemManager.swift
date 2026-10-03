@@ -563,6 +563,18 @@ extension MenuBarItemManager {
             } else {
                 placements[spacer.tag] = .fits
             }
+            logger.debug(
+                """
+                Spacer \(spacer.tag.title, privacy: .public) at \(Int(spacer.bounds.minX), privacy: .public)-\(Int(spacer.bounds.maxX), privacy: .public)\
+                \(spacer.isOnScreen ? "" : " off", privacy: .public)\(spacer.hasSlot ? "" : " noslot", privacy: .public): \
+                \(String(describing: placements[spacer.tag]!), privacy: .public); hidden on bar right of it: \
+                \(hiddenBySpacer.filter { $0.bounds.minX > spacer.bounds.minX }.count, privacy: .public), visible left of it: \
+                \(keptVisible.filter { $0.bounds.minX < spacer.bounds.minX }.count, privacy: .public)
+                """
+            )
+        }
+        if spacers.isEmpty {
+            logger.debug("No spacer slots read")
         }
         return placements
     }
