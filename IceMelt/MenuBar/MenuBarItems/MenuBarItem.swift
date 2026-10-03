@@ -521,8 +521,14 @@ extension MenuBarItem {
     @available(macOS 27.0, *)
     private static func getHostedMenuBarItems(on display: CGDirectDisplayID?) async -> [MenuBarItem] {
         let displayID = display ?? Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
-        return await getHostedMenuBarItemsByDisplay()[displayID] ?? []
+        return await getHostedMenuBarItemsByDisplay(includingSpacers: includesSpacersInReads)[displayID] ?? []
     }
+
+    /// Whether ``getMenuBarItems(on:option:)`` includes the dividers' blank
+    /// spacers (macOS 27). Set by the item manager for the duration of a
+    /// move of a spacer, which must be able to read it back; off otherwise,
+    /// so nothing but the manager's measurement ever sees one.
+    @MainActor static var includesSpacersInReads = false
 
     /// Creates and returns a list of menu bar items, defaulting to the
     /// legacy source pid behavior, prior to macOS 26.

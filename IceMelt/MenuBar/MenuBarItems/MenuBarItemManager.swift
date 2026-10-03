@@ -543,6 +543,17 @@ extension MenuBarItemManager {
             temporarilyShownItemContexts.isEmpty, hostedShownSectionContexts.isEmpty,
             divider.hasSlot, divider.isOnScreen
         else {
+            if placements.values.contains(where: { $0 != .fits }) {
+                logger.debug(
+                    """
+                    Not dragging a spacer: dragging=\(self.isDraggingHostedSpacer, privacy: .public) \
+                    showing=\(self.isTemporarilyShowing, privacy: .public) rehiding=\(self.isRehidingTemporarilyShownItems, privacy: .public) \
+                    shown=\(self.temporarilyShownItemContexts.count, privacy: .public)/\(self.hostedShownSectionContexts.count, privacy: .public) \
+                    divider slot=\(divider.hasSlot, privacy: .public) onScreen=\(divider.isOnScreen, privacy: .public) \
+                    \(NSStringFromRect(divider.bounds), privacy: .public)
+                    """
+                )
+            }
             return
         }
         let now = ContinuousClock.now
@@ -565,7 +576,9 @@ extension MenuBarItemManager {
             """
         )
         Task {
+            MenuBarItem.includesSpacersInReads = true
             defer {
+                MenuBarItem.includesSpacersInReads = false
                 isDraggingHostedSpacer = false
             }
             do {
@@ -2798,7 +2811,7 @@ extension MenuBarItemManager {
         let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
         guard
             let item = items.first(matching: context.tag) ?? items.first,
-            items.contains(where: { !$0.isControlItem && $0.hasSlot && !$0.isOnScreen })
+            items.contains(where: { !$0.isControlItem && !$0.tag.isHostedSpacer && $0.hasSlot && !$0.isOnScreen })
         else {
             return
         }
@@ -2954,7 +2967,7 @@ extension MenuBarItemManager {
                     // misses or shuts it.
                     if let chevron = await settledOverflowChevronFrame(on: displayID) {
                         let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
-                        let isOpen = items.contains { !$0.isControlItem && $0.hasSlot && !$0.isOnScreen }
+                        let isOpen = items.contains { !$0.isControlItem && !$0.tag.isHostedSpacer && $0.hasSlot && !$0.isOnScreen }
                         if !isOpen {
                             try await postHostedClickUnguarded(at: chevron.center, with: .left, for: item, leavingPointer: true)
                         }
@@ -3047,7 +3060,7 @@ extension MenuBarItemManager {
             return
         }
         let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
-        let isExpanded = items.contains { !$0.isControlItem && $0.hasSlot && !$0.isOnScreen }
+        let isExpanded = items.contains { !$0.isControlItem && !$0.tag.isHostedSpacer && $0.hasSlot && !$0.isOnScreen }
         guard isExpanded != expanded, let anyItem = items.first else {
             return
         }
