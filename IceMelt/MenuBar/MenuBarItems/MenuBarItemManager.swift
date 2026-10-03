@@ -33,6 +33,9 @@ final class MenuBarItemManager: ObservableObject {
     /// Whether ``setHostedOverflowExpanded(_:)`` is running (macOS 27).
     private var isSettingHostedOverflow = false
 
+    /// The last layout logged per display, so a layout is logged once.
+    private var lastLoggedLayouts = [CGDirectDisplayID: String]()
+
     /// Whether an item is being moved out and clicked by
     /// ``temporarilyShow(item:clickingWith:)``. Rehiding waits meanwhile:
     /// on macOS 27 both drive the overflow and the dividers, and run
@@ -604,6 +607,11 @@ extension MenuBarItemManager {
             // Items in the overflow are sometimes still listed. They aren't on
             // the bar, so they don't bound the room.
             let onBar = items.filter(\.isOnScreen)
+            let signature = items.map { "\($0.tag.title) \(Int($0.bounds.minX))-\(Int($0.bounds.maxX))\($0.isOnScreen ? "" : " off")\($0.hasSlot ? "" : " noslot")" }.joined(separator: ", ")
+            if lastLoggedLayouts[displayID] != signature {
+                lastLoggedLayouts[displayID] = signature
+                logger.debug("Layout on display \(displayID, privacy: .public): \(signature, privacy: .public)")
+            }
 
             for identifier in [ControlItem.Identifier.hidden, .alwaysHidden] {
                 guard let width = hostedHidingWidth(for: identifier, in: onBar, regionLeft: regionLeft) else {
