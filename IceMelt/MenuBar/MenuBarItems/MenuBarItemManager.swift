@@ -33,6 +33,13 @@ final class MenuBarItemManager: ObservableObject {
     /// Whether ``setHostedOverflowExpanded(_:)`` is running (macOS 27).
     private var isSettingHostedOverflow = false
 
+    /// Whether ``dragMisplacedHostedSpacer(_:placements:divider:)`` has a
+    /// drag in flight.
+    private var isDraggingHostedSpacer = false
+
+    /// How many times each spacer has been dragged, and when last.
+    private var hostedSpacerDragAttempts = [MenuBarItemTag: (Int, ContinuousClock.Instant)]()
+
     /// The last layout logged per display, so a layout is logged once.
     private var lastLoggedLayouts = [CGDirectDisplayID: String]()
 
@@ -512,7 +519,62 @@ extension MenuBarItemManager {
                 // Published on every pass: a spacer re-created at a new position
                 // may land with the same verdict, and still needs the next step.
                 hostedSpacerPlacements = hostedSpacerPlacements(spacers: hostedSpacers, items: items, controlItems: controlItems)
+                dragMisplacedHostedSpacer(hostedSpacers, placements: hostedSpacerPlacements, divider: controlItems.hidden)
             }
+        }
+    }
+
+    /// Moves one spacer the verdicts found out of place to just left of the
+    /// hidden divider with a ⌘-drag (macOS 27), as a Layout-pane drag would.
+    ///
+    /// One per cache pass, and not while an item is temporarily shown: the
+    /// drag reflows the bar under the freeze panel, and the next pass
+    /// judges the result. A spacer is tried a few times at most, some
+    /// seconds apart, so a drag the agent keeps refusing can't become a
+    /// storm of hidden pointers and focus changes.
+    @available(macOS 27.0, *)
+    private func dragMisplacedHostedSpacer(
+        _ spacers: [MenuBarItem],
+        placements: [MenuBarItemTag: HostedSpacerPlacement],
+        divider: MenuBarItem
+    ) {
+        guard
+            !isDraggingHostedSpacer, !isTemporarilyShowing, !isRehidingTemporarilyShownItems,
+            temporarilyShownItemContexts.isEmpty, hostedShownSectionContexts.isEmpty,
+            divider.hasSlot, divider.isOnScreen
+        else {
+            return
+        }
+        let now = ContinuousClock.now
+        guard let spacer = spacers.first(where: { spacer in
+            guard let placement = placements[spacer.tag], placement != .fits else {
+                return false
+            }
+            let attempts = hostedSpacerDragAttempts[spacer.tag] ?? (0, now - .seconds(60))
+            return attempts.0 < 4 && attempts.1.duration(to: now) > .seconds(12)
+        }) else {
+            return
+        }
+        let attempts = hostedSpacerDragAttempts[spacer.tag] ?? (0, now)
+        hostedSpacerDragAttempts[spacer.tag] = (attempts.0 + 1, now)
+        isDraggingHostedSpacer = true
+        logger.notice(
+            """
+            Dragging \(spacer.tag.title, privacy: .public) (\(String(describing: placements[spacer.tag]!), privacy: .public)) \
+            to left of the hidden divider, attempt \(attempts.0 + 1, privacy: .public)
+            """
+        )
+        Task {
+            defer {
+                isDraggingHostedSpacer = false
+            }
+            do {
+                try await move(item: spacer, to: .leftOfItem(divider))
+                hostedSpacerDragAttempts[spacer.tag] = nil
+            } catch {
+                logger.error("Error dragging \(spacer.tag.title, privacy: .public): \(error, privacy: .public)")
+            }
+            await cacheItemsRegardless()
         }
     }
 

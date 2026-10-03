@@ -708,68 +708,22 @@ final class ControlItem {
         ControlItemDefaults[.preferredPosition, spacer.tag.title] = nil
     }
 
-    /// Moves any spacer the item manager found out of place, by re-creating
-    /// it at a new preferred position.
+    /// Records the spacers the item manager found in place.
     ///
-    /// Positions grow toward the leading end. A spacer that landed left of
-    /// an item it should hide needs a smaller position; one that landed
-    /// right of an item that stays visible needs a larger one. Each verdict
-    /// narrows the range, and the next attempt bisects it, until the spacer
-    /// lands between the two or the attempts run out. A confirmed position
-    /// is recorded for the next time the spacer is created.
+    /// A spacer out of place is moved by the item manager with a ⌘-drag
+    /// (`MenuBarItemManager.dragMisplacedHostedSpacer`), not re-created at
+    /// another preferred position: the agent's order is not the order of
+    /// the positions (a spacer landed left of the hidden items at every
+    /// position from 135936 down to 1.7, 2026-10-03). A confirmed
+    /// position is recorded for the next time the spacer is created.
     @available(macOS 27.0, *)
     private func reconcileSpacers(placements: [MenuBarItemTag: MenuBarItemManager.HostedSpacerPlacement]) {
-        var changed = false
         for index in spacers.indices {
-            guard let placement = placements[spacers[index].tag] else {
+            guard placements[spacers[index].tag] == .fits, !spacers[index].isPlaced else {
                 continue
             }
-            var spacer = spacers[index]
-            guard spacer.createdAt.duration(to: .now) > .milliseconds(800) else {
-                continue
-            }
-            switch placement {
-            case .fits:
-                if !spacer.isPlaced {
-                    spacer.isPlaced = true
-                    ControlItemDefaults[.hostedSpacerPosition, spacer.tag.title] = spacer.position
-                    spacers[index] = spacer
-                }
-                continue
-            case .tooFarLeading:
-                spacer.tooLeading = min(spacer.tooLeading ?? .infinity, spacer.position)
-            case .tooFarTrailing:
-                spacer.tooTrailing = max(spacer.tooTrailing, spacer.position)
-            }
-            guard spacer.attempts < Lengths.maxSpacerPlacementAttempts else {
-                continue
-            }
-            let next: CGFloat
-            if let tooLeading = spacer.tooLeading {
-                next = (spacer.tooTrailing + tooLeading) / 2
-            } else {
-                next = max(spacer.position * 2, spacer.position + 100)
-            }
-            guard abs(next - spacer.position) >= 0.5 else {
-                continue // The range has closed without a hit; give up.
-            }
-            Self.logger.info(
-                """
-                Spacer \(spacer.tag.title, privacy: .public) landed \(String(describing: placement), privacy: .public) \
-                at position \(spacer.position, privacy: .public); trying \(next, privacy: .public)
-                """
-            )
-            removeSpacer(spacer)
-            var replacement = createSpacer(tag: spacer.tag, position: next)
-            replacement.tooTrailing = spacer.tooTrailing
-            replacement.tooLeading = spacer.tooLeading
-            replacement.attempts = spacer.attempts + 1
-            replacement.statusItem.length = spacer.statusItem.length
-            spacers[index] = replacement
-            changed = true
-        }
-        if changed {
-            recacheSoon()
+            spacers[index].isPlaced = true
+            ControlItemDefaults[.hostedSpacerPosition, spacers[index].tag.title] = spacers[index].position
         }
     }
 
