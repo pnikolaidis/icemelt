@@ -304,15 +304,8 @@ final class ControlItem {
     /// bar for the first cache to read.
     private var hostedHidingLengths: [CGFloat] {
         let padding = Lengths.hostedPadding
-        // On a notched display an item can sit only right of the notch, and
-        // one wider than that room is discarded there, not overflowed, taking
-        // everything left of it along, chevron included: an 882pt spacer on
-        // a 1800pt laptop (790pt right of the notch) left the laptop with no
-        // chevron and no way to reach the hidden items (2026-10-04).
-        let screenCap = NSScreen.screens.map { screen in
-            min(screen.frame.width / 2, screen.auxiliaryTopRightArea?.width ?? .infinity)
-        }.min() ?? 500
-        let cap = screenCap.rounded(.down) - padding
+        let screenWidth = NSScreen.screens.map(\.frame.width).min() ?? 1_000
+        let cap = (screenWidth / 2).rounded(.down) - padding
         guard let width = hostedHidingWidth else {
             return [0]
         }
