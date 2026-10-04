@@ -54,8 +54,8 @@ final class MenuBarItemManager: ObservableObject {
     /// spacer fitted. IceMelt asks only once the verdict has held.
     private var spacersMisplacedSince: ContinuousClock.Instant?
 
-    /// When the item manager was created: IceMelt doesn't ask while the
-    /// session is starting up and the bar is still settling.
+    /// When the item manager was created: IceMelt doesn't ask in the first
+    /// seconds, while the bar is still settling after launch or login.
     private let createdAt = ContinuousClock.now
 
     /// The last layout logged per display, so a layout is logged once.
@@ -130,7 +130,9 @@ final class MenuBarItemManager: ObservableObject {
             // On macOS 27 the room for hiding depends on the width of the
             // frontmost app's menu (see `updateHostedHidingWidths`).
             .discardMerge(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification))
-            .debounce(for: 1, scheduler: DispatchQueue.main)
+            // Short, so that moving to another display resizes the hiding
+            // items for it before the hidden items there catch the eye.
+            .debounce(for: 0.3, scheduler: DispatchQueue.main)
             .sink { [weak self] in
                 guard let self else {
                     return
@@ -597,7 +599,7 @@ extension MenuBarItemManager {
             return
         case .unasked:
             guard
-                createdAt.duration(to: now) > .seconds(60),
+                createdAt.duration(to: now) > .seconds(15),
                 misplacedSince.duration(to: now) > .seconds(10)
             else {
                 return
