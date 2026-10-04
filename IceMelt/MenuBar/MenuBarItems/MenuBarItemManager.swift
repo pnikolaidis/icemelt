@@ -42,8 +42,8 @@ final class MenuBarItemManager: ObservableObject {
 
     /// Whether the user has agreed to IceMelt arranging its spacers with
     /// ⌘-drags (macOS 27). Each arrangement hides the pointer and reflows
-    /// the bar for a few seconds, so IceMelt asks first, and a refusal
-    /// holds until the next launch.
+    /// the bar for a few seconds, so IceMelt asks first, once per launch:
+    /// the answer holds until the next one.
     private enum SpacerArrangementConsent {
         case unasked, asking, granted, declined
     }
@@ -581,12 +581,13 @@ extension MenuBarItemManager {
             return
         }
         let now = ContinuousClock.now
-        guard placements.values.contains(where: { $0 != .fits }) else {
-            // All in place: a later need asks again.
+        // Spacers matter only while they fill room, on a display too wide for
+        // the divider alone. On the laptop they shrink to nothing, and their
+        // verdicts there say nothing worth asking about.
+        let singleItemCap = (NSScreen.screens.map(\.frame.width).min() ?? 1_000) / 2 - 16
+        let spacersInUse = (hostedHidingWidths[.hidden] ?? 0) > singleItemCap
+        guard spacersInUse, placements.values.contains(where: { $0 != .fits }) else {
             spacersMisplacedSince = nil
-            if spacerArrangementConsent == .granted {
-                spacerArrangementConsent = .unasked
-            }
             return
         }
         let misplacedSince = spacersMisplacedSince ?? now
@@ -643,7 +644,12 @@ extension MenuBarItemManager {
             var spacer = spacers.first(matching: tag)
             if spacer == nil {
                 await setHostedOverflowExpanded(true)
-                spacer = await MenuBarItem.getMenuBarItems(option: .activeSpace).first(matching: tag)
+                // The overflow takes a moment to lay its items out.
+                let deadline = ContinuousClock.now + .seconds(2)
+                repeat {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    spacer = await MenuBarItem.getMenuBarItems(option: .activeSpace).first { $0.tag == tag && $0.hasSlot }
+                } while spacer == nil && ContinuousClock.now < deadline
             }
             if let spacer {
                 do {
