@@ -639,9 +639,21 @@ extension MenuBarItemManager {
                 MenuBarItem.includesSpacersInReads = false
                 isDraggingHostedSpacer = false
             }
-            // An unlisted spacer is in the collapsed overflow: opening it lays
-            // the spacer out where it can be grabbed.
+            // An unlisted spacer may have been discarded for being too wide for
+            // the overflow (see `ControlItem.setSpacerShrunk`): shrunk to
+            // nothing, it is laid out again, on the bar or in the collapsed
+            // overflow, which opening lays out where it can be grabbed. It
+            // grows back once placed, or if it can't be.
+            let owner = appState?.menuBarManager.controlItem(withName: tag.hostedSpacerOwner == .alwaysHidden ? .alwaysHidden : .hidden)
             var spacer = spacers.first(matching: tag)
+            if spacer == nil {
+                owner?.setSpacerShrunk(tag, true)
+                try? await Task.sleep(for: .milliseconds(600))
+                spacer = await MenuBarItem.getMenuBarItems(option: .activeSpace).first { $0.tag == tag && $0.hasSlot }
+            }
+            defer {
+                owner?.setSpacerShrunk(tag, false)
+            }
             if spacer == nil {
                 await setHostedOverflowExpanded(true)
                 // The overflow takes a moment to lay its items out.

@@ -82,6 +82,27 @@ final class ControlItem {
         }
     }
 
+    /// Spacers held at no length while they are being placed (macOS 27).
+    ///
+    /// A spacer that lands out of place, left of the section it should
+    /// hide, overflows ahead of it; one too wide for the overflow is then
+    /// discarded instead, unlisted and unreachable, along with the chevron.
+    /// Shrunk to nothing it fits, the agent lays it out, and it can be
+    /// dragged beside the divider before it grows back.
+    private var shrunkSpacers = Set<MenuBarItemTag>()
+
+    /// Holds the given spacer at no length, or lets it take its share of the
+    /// room again (macOS 27).
+    @available(macOS 27.0, *)
+    func setSpacerShrunk(_ tag: MenuBarItemTag, _ shrunk: Bool) {
+        if shrunk {
+            shrunkSpacers.insert(tag)
+        } else {
+            shrunkSpacers.remove(tag)
+        }
+        updateStatusItem()
+    }
+
     /// The tags of the spacers currently in the menu bar (macOS 27),
     /// including any the agent leaves out of its list because they are in
     /// the overflow.
@@ -691,8 +712,11 @@ final class ControlItem {
             spacers.append(createSpacer(tag: tag, position: position))
             added = true
         }
-        for (index, length) in lengths.enumerated() where spacers[index].statusItem.length != length {
-            spacers[index].statusItem.length = length
+        for (index, length) in lengths.enumerated() {
+            let length = shrunkSpacers.contains(spacers[index].tag) ? 0 : length
+            if spacers[index].statusItem.length != length {
+                spacers[index].statusItem.length = length
+            }
         }
         if added {
             recacheSoon()
