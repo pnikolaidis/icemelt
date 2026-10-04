@@ -154,3 +154,33 @@ under the freeze panel, as the return now does for the divider.
 Debug: `log stream --predicate 'process == "IceMelt" AND subsystem ==
 "com.pnikolaidis.icemelt"' --level debug` logs each display's layout when it changes,
 each spacer's slot and verdict, and the layout before every move and return.
+
+## Update 2026-10-04 (branch `spacer-consent`, stacked on `icebar-single-item-fixes`)
+
+- **Login chaos on the fixes branch.** Placing spacers by ⌘-drag ran on its own, again
+  and again, during login, while the hidden divider kept going missing from the active
+  display's list. Peter saw items shuffle and open by themselves, and the pointer stayed
+  invisible. 2026.3.0 was reinstalled. With the spacer order those drags had set, 2026.3.0
+  hides correctly on the 4K, and the order **survives a relaunch**: macOS remembers it.
+- **Consent.** `spacer-consent` (02fb529) asks before arranging spacers: an alert
+  explaining that the pointer will vanish and the bar will rearrange. It asks only after
+  60 s of uptime and 10 s of a spacer staying out of place. "Not Now" holds until the next
+  launch. Each drag waits for the user to be idle. Not yet seen by Peter: the order was
+  already right, so nothing triggered it.
+- **New constraint: the laptop loses its « while a wide display is attached.** On a
+  notched display the expanded overflow lives between the app menu and the notch (about
+  230 pt with Warp frontmost). An item wider than that isn't overflowed but discarded on
+  that display, together with everything left of it, chevron included. With IceMelt
+  quit, the laptop shows its « and overflow normally. With IceMelt's fillers sized for
+  the 4K (882 pt; 662 pt with a tighter cap), the laptop has no « and no hidden items,
+  so it has no way to reach them. A status item's length is shared across displays, so
+  fillers big enough for the 4K are always too big for the laptop's overflow. Capping at
+  the 790 pt right of the notch didn't help (reverted, e645da3).
+
+Options for the laptop-plus-wide-display case:
+1. **Many small fillers** (each under ~200 pt, about 13 on the 4K), placed once with
+   consent. Works on both displays as long as no app's menus leave less room than that.
+2. **Resize the fillers for whichever display is active.** The bar reflows each time
+   focus moves between displays.
+3. **Accept it**: with a wide display attached, the laptop's bar can't reach hidden
+   items, and the IceMelt Bar would need to click them on the wide display.
