@@ -40,6 +40,24 @@ final class MenuBarItemManager: ObservableObject {
     /// How many times each spacer has been dragged, and when last.
     private var hostedSpacerDragAttempts = [MenuBarItemTag: (Int, ContinuousClock.Instant)]()
 
+    /// Whether the user has agreed to IceMelt arranging its spacers with
+    /// ⌘-drags (macOS 27). Each arrangement hides the pointer and reflows
+    /// the bar for a few seconds, so IceMelt asks first, and a refusal
+    /// holds until the next launch.
+    private enum SpacerArrangementConsent {
+        case unasked, asking, granted, declined
+    }
+
+    private var spacerArrangementConsent = SpacerArrangementConsent.unasked
+
+    /// When a spacer was first seen out of place since the last time every
+    /// spacer fitted. IceMelt asks only once the verdict has held.
+    private var spacersMisplacedSince: ContinuousClock.Instant?
+
+    /// When the item manager was created: IceMelt doesn't ask while the
+    /// session is starting up and the bar is still settling.
+    private let createdAt = ContinuousClock.now
+
     /// The last layout logged per display, so a layout is logged once.
     private var lastLoggedLayouts = [CGDirectDisplayID: String]()
 
@@ -557,6 +575,35 @@ extension MenuBarItemManager {
             return
         }
         let now = ContinuousClock.now
+        guard placements.values.contains(where: { $0 != .fits }) else {
+            // All in place: a later need asks again.
+            spacersMisplacedSince = nil
+            if spacerArrangementConsent == .granted {
+                spacerArrangementConsent = .unasked
+            }
+            return
+        }
+        let misplacedSince = spacersMisplacedSince ?? now
+        spacersMisplacedSince = misplacedSince
+        switch spacerArrangementConsent {
+        case .declined, .asking:
+            return
+        case .unasked:
+            guard
+                createdAt.duration(to: now) > .seconds(60),
+                misplacedSince.duration(to: now) > .seconds(10)
+            else {
+                return
+            }
+            askToArrangeSpacers(count: placements.values.filter { $0 != .fits }.count)
+            return
+        case .granted:
+            // Not while the user is moving the mouse or typing: a drag they
+            // interrupt lands anywhere.
+            guard hasUserPausedInput(for: .seconds(2)) else {
+                return
+            }
+        }
         guard let spacer = spacers.first(where: { spacer in
             guard let placement = placements[spacer.tag], placement != .fits else {
                 return false
@@ -587,6 +634,40 @@ extension MenuBarItemManager {
             } catch {
                 logger.error("Error dragging \(spacer.tag.title, privacy: .public): \(error, privacy: .public)")
             }
+            await cacheItemsRegardless()
+        }
+    }
+
+    /// Asks the user whether IceMelt may arrange its spacers, explaining
+    /// what they'll see (macOS 27).
+    @available(macOS 27.0, *)
+    private func askToArrangeSpacers(count: Int) {
+        spacerArrangementConsent = .asking
+        logger.notice("Asking to arrange \(count, privacy: .public) spacer(s)")
+        let alert = NSAlert()
+        alert.messageText = "IceMelt needs to arrange the menu bar"
+        alert.informativeText = """
+            To hide items on this display, IceMelt has to move \(count == 1 ? "a blank spacer" : "\(count) blank spacers") \
+            next to its divider. While it does, your pointer will disappear for a few seconds and the menu bar \
+            will rearrange once or twice.
+
+            Please don't move the mouse until it's done. macOS remembers the arrangement, so this should only \
+            be needed again if your displays change.
+            """
+        alert.addButton(withTitle: "Arrange Now")
+        alert.addButton(withTitle: "Not Now")
+        // Shown outside the cache pass that found the need, so the passes
+        // carry on while the alert is up.
+        Task { @MainActor in
+            NSApp.activate(ignoringOtherApps: true)
+            let granted = alert.runModal() == .alertFirstButtonReturn
+            logger.notice("Spacer arrangement \(granted ? "granted" : "declined", privacy: .public)")
+            spacerArrangementConsent = granted ? .granted : .declined
+            guard granted else {
+                return
+            }
+            // Let the alert go and the user's hand leave the mouse.
+            try? await Task.sleep(for: .seconds(2))
             await cacheItemsRegardless()
         }
     }
