@@ -536,8 +536,13 @@ extension MenuBarItemManager {
             if #available(macOS 27.0, *) {
                 // Published on every pass: a spacer re-created at a new position
                 // may land with the same verdict, and still needs the next step.
-                hostedSpacerPlacements = hostedSpacerPlacements(spacers: hostedSpacers, items: items, controlItems: controlItems)
-                dragMisplacedHostedSpacer(hostedSpacers, placements: hostedSpacerPlacements, divider: controlItems.hidden)
+                hostedSpacerPlacements = hostedSpacerPlacements(
+                    spacers: hostedSpacers,
+                    liveSpacerTags: await ControlItem.hostedSpacerTags,
+                    items: items,
+                    controlItems: controlItems
+                )
+                dragMisplacedHostedSpacer(hostedSpacers, placements: hostedSpacerPlacements, controlItems: controlItems)
             }
         }
     }
@@ -554,8 +559,9 @@ extension MenuBarItemManager {
     private func dragMisplacedHostedSpacer(
         _ spacers: [MenuBarItem],
         placements: [MenuBarItemTag: HostedSpacerPlacement],
-        divider: MenuBarItem
+        controlItems: ControlItemPair
     ) {
+        let divider = controlItems.hidden
         guard
             !isDraggingHostedSpacer, !isTemporarilyShowing, !isRehidingTemporarilyShownItems,
             temporarilyShownItemContexts.isEmpty, hostedShownSectionContexts.isEmpty,
@@ -604,22 +610,26 @@ extension MenuBarItemManager {
                 return
             }
         }
-        guard let spacer = spacers.first(where: { spacer in
-            guard let placement = placements[spacer.tag], placement != .fits else {
+        guard let tag = placements.keys.sorted(by: { $0.title < $1.title }).first(where: { tag in
+            guard let placement = placements[tag], placement != .fits else {
                 return false
             }
-            let attempts = hostedSpacerDragAttempts[spacer.tag] ?? (0, now - .seconds(60))
+            let attempts = hostedSpacerDragAttempts[tag] ?? (0, now - .seconds(60))
             return attempts.0 < 4 && attempts.1.duration(to: now) > .seconds(12)
         }) else {
             return
         }
-        let attempts = hostedSpacerDragAttempts[spacer.tag] ?? (0, now)
-        hostedSpacerDragAttempts[spacer.tag] = (attempts.0 + 1, now)
+        // A spacer goes beside its own divider.
+        guard let ownDivider = tag.hostedSpacerOwner == .alwaysHidden ? controlItems.alwaysHidden : divider else {
+            return
+        }
+        let attempts = hostedSpacerDragAttempts[tag] ?? (0, now)
+        hostedSpacerDragAttempts[tag] = (attempts.0 + 1, now)
         isDraggingHostedSpacer = true
         logger.notice(
             """
-            Dragging \(spacer.tag.title, privacy: .public) (\(String(describing: placements[spacer.tag]!), privacy: .public)) \
-            to left of the hidden divider, attempt \(attempts.0 + 1, privacy: .public)
+            Dragging \(tag.title, privacy: .public) (\(String(describing: placements[tag]!), privacy: .public)) \
+            to left of \(ownDivider.tag.title, privacy: .public), attempt \(attempts.0 + 1, privacy: .public)
             """
         )
         Task {
@@ -628,11 +638,23 @@ extension MenuBarItemManager {
                 MenuBarItem.includesSpacersInReads = false
                 isDraggingHostedSpacer = false
             }
-            do {
-                try await move(item: spacer, to: .leftOfItem(divider))
-                hostedSpacerDragAttempts[spacer.tag] = nil
-            } catch {
-                logger.error("Error dragging \(spacer.tag.title, privacy: .public): \(error, privacy: .public)")
+            // An unlisted spacer is in the collapsed overflow: opening it lays
+            // the spacer out where it can be grabbed.
+            var spacer = spacers.first(matching: tag)
+            if spacer == nil {
+                await setHostedOverflowExpanded(true)
+                spacer = await MenuBarItem.getMenuBarItems(option: .activeSpace).first(matching: tag)
+            }
+            if let spacer {
+                do {
+                    try await move(item: spacer, to: .leftOfItem(ownDivider))
+                    hostedSpacerDragAttempts[tag] = nil
+                } catch {
+                    logger.error("Error dragging \(tag.title, privacy: .public): \(error, privacy: .public)")
+                }
+            } else {
+                logger.error("Couldn't reach \(tag.title, privacy: .public) in the overflow")
+                await setHostedOverflowExpanded(false)
             }
             await cacheItemsRegardless()
         }
@@ -684,10 +706,29 @@ extension MenuBarItemManager {
     @available(macOS 27.0, *)
     private func hostedSpacerPlacements(
         spacers: [MenuBarItem],
+        liveSpacerTags: Set<MenuBarItemTag>,
         items: [MenuBarItem],
         controlItems: ControlItemPair
     ) -> [MenuBarItemTag: HostedSpacerPlacement] {
         var placements = [MenuBarItemTag: HostedSpacerPlacement]()
+        // A spacer the agent leaves out of its list is in the collapsed
+        // overflow. With an item it should hide still on the bar, it overflowed
+        // ahead of that item, so it is left of it: out of place. Without this
+        // it never got a verdict and the section stayed on the bar.
+        let listedTags = Set(spacers.map(\.tag))
+        for tag in liveSpacerTags where !listedTags.contains(tag) {
+            guard let owner = tag.hostedSpacerOwner else {
+                continue
+            }
+            let hiddenSections: [MenuBarSection.Name] = owner == .alwaysHidden ? [.alwaysHidden] : [.hidden, .alwaysHidden]
+            let hiddenOnBar = items.contains { item in
+                item.isOnScreen && itemCache.address(for: item.tag).map { hiddenSections.contains($0.section) } == true
+            }
+            if hiddenOnBar {
+                placements[tag] = .tooFarLeading
+                logger.debug("Spacer \(tag.title, privacy: .public) not listed while hidden items are on the bar: tooFarLeading")
+            }
+        }
         for spacer in spacers {
             guard let owner = spacer.tag.hostedSpacerOwner else {
                 continue

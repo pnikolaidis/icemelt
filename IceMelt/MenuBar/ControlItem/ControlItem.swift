@@ -82,6 +82,13 @@ final class ControlItem {
         }
     }
 
+    /// The tags of the spacers currently in the menu bar (macOS 27),
+    /// including any the agent leaves out of its list because they are in
+    /// the overflow.
+    static var hostedSpacerTags: Set<MenuBarItemTag> {
+        Set(liveSpacers.keys)
+    }
+
     /// Converts a status window frame from AppKit's flipped coordinates to
     /// screen coordinates.
     private static func screenFrame(for frame: CGRect) -> CGRect? {
@@ -616,7 +623,7 @@ final class ControlItem {
             return
         }
 
-        if #available(macOS 27.0, *), isSectionDivider, isVisible, state == .hideSection {
+        if #available(macOS 27.0, *), isSectionDivider, isVisible, state == .hideSection, isAddedToMenuBar {
             constraint?.isActive = true
             let lengths = hostedHidingLengths
             statusItem.length = lengths[0]
@@ -625,7 +632,11 @@ final class ControlItem {
         }
 
         if #available(macOS 27.0, *), isSectionDivider {
-            updateSpacers(lengths: [])
+            // Shown, the spacers shrink to nothing but stay, keeping their
+            // arranged place for the next hide; removed and re-created, they
+            // land out of place every time. Only a disabled section loses
+            // them.
+            updateSpacers(lengths: isAddedToMenuBar ? Array(repeating: 0, count: spacers.count) : [])
         }
 
         if isVisible {
