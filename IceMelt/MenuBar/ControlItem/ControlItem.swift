@@ -290,10 +290,9 @@ final class ControlItem {
     ///
     /// A status item has one length on every display, so the cap is that of
     /// the narrowest display: an item over a display's cap is discarded there
-    /// yet still consumes room, wiping out the application menu, whereas an
-    /// item under the cap that doesn't fit simply overflows, taking the
-    /// section with it. Filling the widest display's room therefore hides the
-    /// section on every display at once.
+    /// yet still consumes room, wiping out the application menu. The room
+    /// filled is the active display's (see
+    /// `MenuBarItemManager.hostedHidingWidths`).
     ///
     /// Until a measurement exists the divider stays collapsed, so the
     /// section shows for a moment at launch. Taking the most it can instead
@@ -311,7 +310,12 @@ final class ControlItem {
         }
         // Each item occupies its length plus the agent's padding.
         let slot = cap + padding
-        let count = min(max(Int((width / slot).rounded(.up)), 1), Lengths.maxHidingItems)
+        // The count never drops while IceMelt runs: the room changes with the
+        // active display and the frontmost app, and a spacer removed and later
+        // re-created loses its arranged place beside the divider. Unneeded
+        // ones shrink to nothing instead.
+        let needed = max(Int((width / slot).rounded(.up)), spacers.count + 1, 1)
+        let count = min(needed, Lengths.maxHidingItems)
         let length = min(max(width / CGFloat(count) - padding, 0), cap)
         var lengths = Array(repeating: length, count: count)
         lengths[0] = max(length - hostedLengthReduction, 0)

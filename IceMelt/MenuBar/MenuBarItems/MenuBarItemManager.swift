@@ -748,17 +748,23 @@ extension MenuBarItemManager {
     /// is the room between the application menu and the first item that must
     /// stay visible, less a margin narrower than any item.
     ///
-    /// A status item has one length on every display, so the room is
-    /// measured on every display and the widest wins: filling it hides the
-    /// section on the wide display, and on a narrower one the divider and
-    /// its spacers simply overflow along with the section (see
-    /// `ControlItem.hostedHidingLengths`).
+    /// A status item has one length on every display, so the room is that
+    /// of the display whose menu bar is active. Filling the widest display's
+    /// room instead hid the section there but broke a notched laptop beside
+    /// it: there the overflow fits only what lies between the app menu and
+    /// the notch, an item wider than that is discarded rather than
+    /// overflowed, and it takes everything left of it with it, chevron
+    /// included (2026-10-04). Sized for the active display, the dividers fit
+    /// on its bar and the hidden items overflow behind a working chevron;
+    /// the other display may show some hidden items until it becomes active.
+    /// Every display is still measured for the log.
     @available(macOS 27.0, *)
     private func updateHostedHidingWidths(itemsByDisplay: [CGDirectDisplayID: [MenuBarItem]]) {
         guard let applicationMenuFrame = NSScreen.screens.first?.getApplicationMenuFrame() else {
             return
         }
         var measured = [ControlItem.Identifier: CGFloat]()
+        let activeDisplayID = activeMenuBarDisplayID ?? Bridging.getActiveMenuBarDisplayID()
         for (displayID, items) in itemsByDisplay {
             guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
                 continue
@@ -791,7 +797,9 @@ extension MenuBarItemManager {
                     \(width, privacy: .public) (region from \(regionLeft, privacy: .public), \(onBar.count, privacy: .public) items on bar)
                     """
                 )
-                measured[identifier] = max(measured[identifier] ?? 0, width)
+                if displayID == activeDisplayID || itemsByDisplay.count == 1 {
+                    measured[identifier] = width
+                }
             }
         }
 
