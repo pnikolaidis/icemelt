@@ -24,6 +24,32 @@ final class MenuBarItemManager: ObservableObject {
     /// operation; a divider that couldn't be measured is absent.
     @Published private(set) var hostedHidingWidths = [ControlItem.Identifier: CGFloat]()
 
+    /// The length the hidden divider should take so that it overflows along
+    /// with its section, or `nil` to fill the room instead (macOS 27).
+    ///
+    /// The chevron always leads the items on the bar. Filling the room
+    /// leaves the divider's blank stretch between the chevron and the
+    /// visible items, which looks broken. A divider too wide for the room
+    /// doesn't fit on the bar, so it overflows, and everything left of it
+    /// with it, leaving the chevron against the visible items. It must
+    /// still fit the overflow, which on a notched display is the room
+    /// between the app menu and the notch: wider, it's discarded along with
+    /// the chevron. So this applies only when that room exceeds the bar's
+    /// room by a margin, which depends on the frontmost app's menus.
+    @Published private(set) var hostedDividerOverflowLength: CGFloat?
+
+    /// Apps whose menus left no chevron when the divider overflowed: the
+    /// room fills instead while they're frontmost (macOS 27).
+    private var appsDefeatingDividerOverflow = Set<String>()
+
+    /// Consecutive passes with the divider overflowed and no chevron. One
+    /// can be a reflow in progress; two mean the divider was discarded.
+    private var passesWithoutChevron = 0
+
+    /// The hidden divider as last read, to stand in for it while it sits in
+    /// the overflow, unlisted (macOS 27).
+    private var lastHiddenControlItem: MenuBarItem?
+
     /// Where each of the dividers' spacers landed relative to the sections
     /// on macOS 27, keyed by the spacer's tag, as of the most recent cache
     /// operation (see ``hostedSpacerPlacements(spacers:items:controlItems:)``). A spacer
@@ -301,6 +327,11 @@ extension MenuBarItemManager {
             self.hidden = hidden
             self.alwaysHidden = items.removeFirst(matching: .alwaysHiddenControlItem)
         }
+
+        init(hidden: MenuBarItem, alwaysHidden: MenuBarItem?) {
+            self.hidden = hidden
+            self.alwaysHidden = alwaysHidden
+        }
     }
 
     /// Context maintained during a menu bar item cache operation.
@@ -515,7 +546,24 @@ extension MenuBarItemManager {
             let itemWindowIDs = currentItemWindowIDs ?? items.reversed().map { $0.windowID }
             await cacheActor.updateCachedItemWindowIDs(itemWindowIDs)
 
-            guard let controlItems = ControlItemPair(items: &items) else {
+            var pair = ControlItemPair(items: &items)
+            if let found = pair?.hidden, found.hasSlot {
+                lastHiddenControlItem = found
+            }
+            // Overflowed on purpose (see `hostedDividerOverflowLength`), the
+            // divider is often unlisted. Everything on the bar is then
+            // visible and everything overflowed hidden, which a stand-in at
+            // the chevron expresses.
+            if
+                pair == nil,
+                #available(macOS 27.0, *),
+                hostedDividerOverflowLength != nil,
+                let last = lastHiddenControlItem,
+                let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID ?? CGMainDisplayID()]
+            {
+                pair = ControlItemPair(hidden: last.standingIn(at: chevron), alwaysHidden: items.removeFirst(matching: .alwaysHiddenControlItem))
+            }
+            guard let controlItems = pair else {
                 // The hidden control item can be missing transiently, e.g. while
                 // the active menu bar display's item list settles after a space
                 // or display change. Emptying the cache drops the IceMelt Bar
@@ -864,6 +912,8 @@ extension MenuBarItemManager {
             }
         }
 
+        updateHostedDividerOverflowLength(room: measured[.hidden], activeDisplayID: activeDisplayID, applicationMenuFrame: applicationMenuFrame)
+
         var widths = hostedHidingWidths
         for (identifier, width) in measured {
             // Every change reflows the bar, so ignore ones too small to matter.
@@ -874,6 +924,58 @@ extension MenuBarItemManager {
         }
         if widths != hostedHidingWidths {
             hostedHidingWidths = widths
+        }
+    }
+
+    /// Decides ``hostedDividerOverflowLength`` for the active display.
+    @available(macOS 27.0, *)
+    private func updateHostedDividerOverflowLength(
+        room: CGFloat?,
+        activeDisplayID: CGDirectDisplayID?,
+        applicationMenuFrame: CGRect
+    ) {
+        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        var length: CGFloat?
+        if
+            let room,
+            let activeDisplayID,
+            let screen = NSScreen.screens.first(where: { $0.displayID == activeDisplayID }),
+            let leftArea = screen.auxiliaryTopLeftArea,
+            screen.hasNotch,
+            !appsDefeatingDividerOverflow.contains(frontmost)
+        {
+            // In global x: the notch's leading edge, and the app menu's
+            // trailing edge plus the agent's padding.
+            let displayBounds = CGDisplayBounds(activeDisplayID)
+            let notchMinX = displayBounds.minX + leftArea.maxX
+            let menuMaxX = displayBounds.minX + (applicationMenuFrame.maxX - CGDisplayBounds(CGMainDisplayID()).minX) + 16
+            let capacity = notchMinX - menuMaxX - 8
+            // Wider than the room by a margin, so it can't fit on the bar, and
+            // within the overflow's room, so it isn't discarded.
+            if capacity > room + 24 {
+                length = min(capacity, room + 40)
+            }
+        }
+        // With the divider overflowed, no chevron means it was discarded:
+        // this app's menus leave too little room. Fill the room instead.
+        if
+            hostedDividerOverflowLength != nil,
+            let activeDisplayID,
+            MenuBarItem.hostedOverflowChevronFrames[activeDisplayID] == nil
+        {
+            passesWithoutChevron += 1
+        } else {
+            passesWithoutChevron = 0
+        }
+        if passesWithoutChevron >= 2, !frontmost.isEmpty {
+            passesWithoutChevron = 0
+            logger.notice("No chevron with the divider overflowed under \(frontmost, privacy: .public); filling the room instead")
+            appsDefeatingDividerOverflow.insert(frontmost)
+            length = nil
+        }
+        if length.map({ abs($0 - (hostedDividerOverflowLength ?? -100)) >= 8 }) ?? (hostedDividerOverflowLength != nil) {
+            logger.debug("Divider overflow length: \(length.map { "\($0)" } ?? "none", privacy: .public)")
+            hostedDividerOverflowLength = length
         }
     }
 

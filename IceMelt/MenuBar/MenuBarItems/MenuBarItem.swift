@@ -218,6 +218,24 @@ struct MenuBarItem: CustomStringConvertible {
     /// An item in the system overflow is not on screen. The agent still lists
     /// it, but at a stacked position that says nothing about where it sits.
     @available(macOS 27.0, *)
+    /// Returns a copy of the item placed at the given bounds, off the bar
+    /// (macOS 27). Stands in for IceMelt's hidden divider while it sits in
+    /// the system overflow, unlisted (see `MenuBarItemManager`).
+    func standingIn(at bounds: CGRect) -> MenuBarItem {
+        MenuBarItem(copying: self, bounds: bounds)
+    }
+
+    private init(copying item: MenuBarItem, bounds: CGRect) {
+        self.tag = item.tag
+        self.windowID = item.windowID
+        self.ownerPID = item.ownerPID
+        self.sourcePID = item.sourcePID
+        self.bounds = bounds
+        self.title = item.title
+        self.isOnScreen = false
+        self.hasSlot = false
+    }
+
     private init(hosted item: HostedMenuBarItem, tag: MenuBarItemTag, ownerPID: pid_t, isOnScreen: Bool, hasSlot: Bool) {
         self.tag = tag
         self.windowID = Self.hostedWindowIDFlag | (CGWindowID(truncatingIfNeeded: tag.hashValue) & (Self.hostedWindowIDFlag - 1))

@@ -258,6 +258,10 @@ final class ControlItem {
     /// as last measured by the item manager.
     private var hostedHidingWidth: CGFloat?
 
+    /// The length that makes the divider overflow with its section, when
+    /// the item manager has found one (macOS 27).
+    private var hostedDividerOverflowLength: CGFloat?
+
     /// How much shorter than the measured room the divider is kept, on
     /// macOS 27, while a hidden item is temporarily shown on the bar: the
     /// item's slot, so the bar stays exactly full. See
@@ -331,6 +335,12 @@ final class ControlItem {
     /// bar for the first cache to read.
     private var hostedHidingLengths: [CGFloat] {
         let padding = Lengths.hostedPadding
+        // Overflowing along with the section instead of filling the room
+        // (see `MenuBarItemManager.hostedDividerOverflowLength`). Spacers
+        // aren't needed; they shrink to nothing and keep their place.
+        if identifier == .hidden, let overflowLength = hostedDividerOverflowLength {
+            return [max(overflowLength - padding, 0)] + Array(repeating: 0, count: spacers.count)
+        }
         let screenWidth = NSScreen.screens.map(\.frame.width).min() ?? 1_000
         let cap = (screenWidth / 2).rounded(.down) - padding
         guard let width = hostedHidingWidth else {
@@ -439,6 +449,15 @@ final class ControlItem {
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] width in
                     self?.hostedHidingWidth = width
+                    self?.updateStatusItem()
+                }
+                .store(in: &c)
+
+            appState.itemManager.$hostedDividerOverflowLength
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] length in
+                    self?.hostedDividerOverflowLength = length
                     self?.updateStatusItem()
                 }
                 .store(in: &c)
