@@ -679,7 +679,7 @@ extension MenuBarItemManager {
         isDraggingHostedSpacer = true
         logger.notice(
             """
-            Dragging \(tag.title, privacy: .public) (\(String(describing: placements[tag]!), privacy: .public)) \
+            Dragging \(tag.title, privacy: .public) (\(placements[tag].map { String(describing: $0) } ?? "?", privacy: .public)) \
             to left of \(ownDivider.tag.title, privacy: .public), attempt \(attempts.0 + 1, privacy: .public)
             """
         )
@@ -832,7 +832,7 @@ extension MenuBarItemManager {
                 """
                 Spacer \(spacer.tag.title, privacy: .public) at \(Int(spacer.bounds.minX), privacy: .public)-\(Int(spacer.bounds.maxX), privacy: .public)\
                 \(spacer.isOnScreen ? "" : " off", privacy: .public)\(spacer.hasSlot ? "" : " noslot", privacy: .public): \
-                \(String(describing: placements[spacer.tag]!), privacy: .public); hidden on bar right of it: \
+                \(placements[spacer.tag].map { String(describing: $0) } ?? "?", privacy: .public); hidden on bar right of it: \
                 \(hiddenBySpacer.filter { $0.bounds.minX > spacer.bounds.minX }.count, privacy: .public), visible left of it: \
                 \(keptVisible.filter { $0.bounds.minX < spacer.bounds.minX }.count, privacy: .public)
                 """
@@ -2310,7 +2310,7 @@ extension MenuBarItemManager {
         let dividerMaxX = items.first(matching: .hiddenControlItem).map { $0.hasSlot ? $0.bounds.maxX : nil } ?? nil
         let right = items
             .filter { $0.isOnScreen && !$0.isControlItem && !$0.tag.isHostedSpacer && $0.tag != excluded }
-            .filter { dividerMaxX == nil || $0.bounds.minX >= dividerMaxX! - 1 }
+            .filter { item in dividerMaxX.map { item.bounds.minX >= $0 - 1 } ?? true }
             .map(\.bounds.minX)
             .min() ?? displayBounds.maxX
         guard right > left, let height = screen.getMenuBarHeight() else {
