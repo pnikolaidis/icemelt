@@ -218,6 +218,24 @@ struct MenuBarItem: CustomStringConvertible {
     /// An item in the system overflow is not on screen. The agent still lists
     /// it, but at a stacked position that says nothing about where it sits.
     @available(macOS 27.0, *)
+    /// Returns a copy of the item placed at the given bounds, off the bar
+    /// (macOS 27). Stands in for IceMelt's hidden divider while it sits in
+    /// the system overflow, unlisted (see `MenuBarItemManager`).
+    func standingIn(at bounds: CGRect) -> MenuBarItem {
+        MenuBarItem(copying: self, bounds: bounds)
+    }
+
+    private init(copying item: MenuBarItem, bounds: CGRect) {
+        self.tag = item.tag
+        self.windowID = item.windowID
+        self.ownerPID = item.ownerPID
+        self.sourcePID = item.sourcePID
+        self.bounds = bounds
+        self.title = item.title
+        self.isOnScreen = false
+        self.hasSlot = false
+    }
+
     private init(hosted item: HostedMenuBarItem, tag: MenuBarItemTag, ownerPID: pid_t, isOnScreen: Bool, hasSlot: Bool) {
         self.tag = tag
         self.windowID = Self.hostedWindowIDFlag | (CGWindowID(truncatingIfNeeded: tag.hashValue) & (Self.hostedWindowIDFlag - 1))
@@ -462,6 +480,15 @@ extension MenuBarItem {
                         return nil
                     }
                     tag = MenuBarItemTag(namespace: .menuBarAgent, title: identifier)
+                } else if item.sourcePID == ownPID, let identifier = item.identifier {
+                    // Named by its button's accessibility identifier, which
+                    // holds on every display; a status window has a frame on
+                    // one display only.
+                    let named = MenuBarItemTag(namespace: .iceMelt, title: identifier)
+                    if named.isHostedSpacer, !includingSpacers {
+                        return nil
+                    }
+                    tag = named
                 } else if item.sourcePID == ownPID {
                     // Match the slot to the nearest of our items by position. A
                     // slot of ours that matches none is skipped: a spacer when
@@ -512,8 +539,14 @@ extension MenuBarItem {
     @available(macOS 27.0, *)
     private static func getHostedMenuBarItems(on display: CGDirectDisplayID?) async -> [MenuBarItem] {
         let displayID = display ?? Bridging.getActiveMenuBarDisplayID() ?? CGMainDisplayID()
-        return await getHostedMenuBarItemsByDisplay()[displayID] ?? []
+        return await getHostedMenuBarItemsByDisplay(includingSpacers: includesSpacersInReads)[displayID] ?? []
     }
+
+    /// Whether ``getMenuBarItems(on:option:)`` includes the dividers' blank
+    /// spacers (macOS 27). Set by the item manager for the duration of a
+    /// move of a spacer, which must be able to read it back; off otherwise,
+    /// so nothing but the manager's measurement ever sees one.
+    @MainActor static var includesSpacersInReads = false
 
     /// Creates and returns a list of menu bar items, defaulting to the
     /// legacy source pid behavior, prior to macOS 26.

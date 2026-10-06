@@ -82,6 +82,34 @@ final class ControlItem {
         }
     }
 
+    /// Spacers held at no length while they are being placed (macOS 27).
+    ///
+    /// A spacer that lands out of place, left of the section it should
+    /// hide, overflows ahead of it; one too wide for the overflow is then
+    /// discarded instead, unlisted and unreachable, along with the chevron.
+    /// Shrunk to nothing it fits, the agent lays it out, and it can be
+    /// dragged beside the divider before it grows back.
+    private var shrunkSpacers = Set<MenuBarItemTag>()
+
+    /// Holds the given spacer at no length, or lets it take its share of the
+    /// room again (macOS 27).
+    @available(macOS 27.0, *)
+    func setSpacerShrunk(_ tag: MenuBarItemTag, _ shrunk: Bool) {
+        if shrunk {
+            shrunkSpacers.insert(tag)
+        } else {
+            shrunkSpacers.remove(tag)
+        }
+        updateStatusItem()
+    }
+
+    /// The tags of the spacers currently in the menu bar (macOS 27),
+    /// including any the agent leaves out of its list because they are in
+    /// the overflow.
+    static var hostedSpacerTags: Set<MenuBarItemTag> {
+        Set(liveSpacers.keys)
+    }
+
     /// Converts a status window frame from AppKit's flipped coordinates to
     /// screen coordinates.
     private static func screenFrame(for frame: CGRect) -> CGRect? {
@@ -140,6 +168,9 @@ final class ControlItem {
 
             self.statusItem = NSStatusBar.system.statusItem(withLength: 0)
             self.statusItem.autosaveName = controlItem.identifier.rawValue
+            // Names the slot in MenuBarAgent's tree on every display
+            // (macOS 27); see `HostedItemReader`.
+            self.statusItem.button?.setAccessibilityIdentifier(controlItem.identifier.rawValue)
 
             if let button = statusItem.button {
                 // This could break in a new macOS release, but we need this constraint in order to
@@ -227,6 +258,22 @@ final class ControlItem {
     /// as last measured by the item manager.
     private var hostedHidingWidth: CGFloat?
 
+    /// The length that makes the divider overflow with its section, when
+    /// the item manager has found one (macOS 27).
+    private var hostedDividerOverflowLength: CGFloat?
+
+    /// How much shorter than the measured room the divider is kept, on
+    /// macOS 27, while a hidden item is temporarily shown on the bar: the
+    /// item's slot, so the bar stays exactly full. See
+    /// `MenuBarItemManager.temporarilyShow(item:clickingWith:)`.
+    var hostedLengthReduction: CGFloat = 0 {
+        didSet {
+            if #available(macOS 27.0, *), isSectionDivider, state == .hideSection, isAddedToMenuBar {
+                updateStatusItemVisibility(true)
+            }
+        }
+    }
+
     /// A blank status item that fills room the divider can't cover on its
     /// own, on macOS 27, with the state of the search for its place beside
     /// the divider. See ``hostedHidingLengths`` and ``updateSpacers(lengths:)``.
@@ -275,10 +322,9 @@ final class ControlItem {
     ///
     /// A status item has one length on every display, so the cap is that of
     /// the narrowest display: an item over a display's cap is discarded there
-    /// yet still consumes room, wiping out the application menu, whereas an
-    /// item under the cap that doesn't fit simply overflows, taking the
-    /// section with it. Filling the widest display's room therefore hides the
-    /// section on every display at once.
+    /// yet still consumes room, wiping out the application menu. The room
+    /// filled is the active display's (see
+    /// `MenuBarItemManager.hostedHidingWidths`).
     ///
     /// Until a measurement exists the divider stays collapsed, so the
     /// section shows for a moment at launch. Taking the most it can instead
@@ -289,6 +335,12 @@ final class ControlItem {
     /// bar for the first cache to read.
     private var hostedHidingLengths: [CGFloat] {
         let padding = Lengths.hostedPadding
+        // Overflowing along with the section instead of filling the room
+        // (see `MenuBarItemManager.hostedDividerOverflowLength`). Spacers
+        // aren't needed; they shrink to nothing and keep their place.
+        if identifier == .hidden, let overflowLength = hostedDividerOverflowLength {
+            return [max(overflowLength - padding, 0)] + Array(repeating: 0, count: spacers.count)
+        }
         let screenWidth = NSScreen.screens.map(\.frame.width).min() ?? 1_000
         let cap = (screenWidth / 2).rounded(.down) - padding
         guard let width = hostedHidingWidth else {
@@ -296,9 +348,16 @@ final class ControlItem {
         }
         // Each item occupies its length plus the agent's padding.
         let slot = cap + padding
-        let count = min(max(Int((width / slot).rounded(.up)), 1), Lengths.maxHidingItems)
+        // The count never drops while IceMelt runs: the room changes with the
+        // active display and the frontmost app, and a spacer removed and later
+        // re-created loses its arranged place beside the divider. Unneeded
+        // ones shrink to nothing instead.
+        let needed = max(Int((width / slot).rounded(.up)), spacers.count + 1, 1)
+        let count = min(needed, Lengths.maxHidingItems)
         let length = min(max(width / CGFloat(count) - padding, 0), cap)
-        return Array(repeating: length, count: count)
+        var lengths = Array(repeating: length, count: count)
+        lengths[0] = max(length - hostedLengthReduction, 0)
+        return lengths
     }
 
     /// A Boolean value that indicates whether the control item serves as
@@ -390,6 +449,15 @@ final class ControlItem {
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] width in
                     self?.hostedHidingWidth = width
+                    self?.updateStatusItem()
+                }
+                .store(in: &c)
+
+            appState.itemManager.$hostedDividerOverflowLength
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] length in
+                    self?.hostedDividerOverflowLength = length
                     self?.updateStatusItem()
                 }
                 .store(in: &c)
@@ -595,7 +663,7 @@ final class ControlItem {
             return
         }
 
-        if #available(macOS 27.0, *), isSectionDivider, isVisible, state == .hideSection {
+        if #available(macOS 27.0, *), isSectionDivider, isVisible, state == .hideSection, isAddedToMenuBar {
             constraint?.isActive = true
             let lengths = hostedHidingLengths
             statusItem.length = lengths[0]
@@ -604,7 +672,11 @@ final class ControlItem {
         }
 
         if #available(macOS 27.0, *), isSectionDivider {
-            updateSpacers(lengths: [])
+            // Shown, the spacers shrink to nothing but stay, keeping their
+            // arranged place for the next hide; removed and re-created, they
+            // land out of place every time. Only a disabled section loses
+            // them.
+            updateSpacers(lengths: isAddedToMenuBar ? Array(repeating: 0, count: spacers.count) : [])
         }
 
         if isVisible {
@@ -659,8 +731,11 @@ final class ControlItem {
             spacers.append(createSpacer(tag: tag, position: position))
             added = true
         }
-        for (index, length) in lengths.enumerated() where spacers[index].statusItem.length != length {
-            spacers[index].statusItem.length = length
+        for (index, length) in lengths.enumerated() {
+            let length = shrunkSpacers.contains(spacers[index].tag) ? 0 : length
+            if spacers[index].statusItem.length != length {
+                spacers[index].statusItem.length = length
+            }
         }
         if added {
             recacheSoon()
@@ -676,6 +751,7 @@ final class ControlItem {
         // An item whose button is never touched gets a zero-width slot.
         statusItem.button?.title = ""
         statusItem.button?.appearsDisabled = true
+        statusItem.button?.setAccessibilityIdentifier(tag.title)
         Self.liveSpacers[tag] = statusItem
         return Spacer(statusItem: statusItem, tag: tag, position: position)
     }
@@ -690,68 +766,22 @@ final class ControlItem {
         ControlItemDefaults[.preferredPosition, spacer.tag.title] = nil
     }
 
-    /// Moves any spacer the item manager found out of place, by re-creating
-    /// it at a new preferred position.
+    /// Records the spacers the item manager found in place.
     ///
-    /// Positions grow toward the leading end. A spacer that landed left of
-    /// an item it should hide needs a smaller position; one that landed
-    /// right of an item that stays visible needs a larger one. Each verdict
-    /// narrows the range, and the next attempt bisects it, until the spacer
-    /// lands between the two or the attempts run out. A confirmed position
-    /// is recorded for the next time the spacer is created.
+    /// A spacer out of place is moved by the item manager with a ⌘-drag
+    /// (`MenuBarItemManager.dragMisplacedHostedSpacer`), not re-created at
+    /// another preferred position: the agent's order is not the order of
+    /// the positions (a spacer landed left of the hidden items at every
+    /// position from 135936 down to 1.7, 2026-10-03). A confirmed
+    /// position is recorded for the next time the spacer is created.
     @available(macOS 27.0, *)
     private func reconcileSpacers(placements: [MenuBarItemTag: MenuBarItemManager.HostedSpacerPlacement]) {
-        var changed = false
         for index in spacers.indices {
-            guard let placement = placements[spacers[index].tag] else {
+            guard placements[spacers[index].tag] == .fits, !spacers[index].isPlaced else {
                 continue
             }
-            var spacer = spacers[index]
-            guard spacer.createdAt.duration(to: .now) > .milliseconds(800) else {
-                continue
-            }
-            switch placement {
-            case .fits:
-                if !spacer.isPlaced {
-                    spacer.isPlaced = true
-                    ControlItemDefaults[.hostedSpacerPosition, spacer.tag.title] = spacer.position
-                    spacers[index] = spacer
-                }
-                continue
-            case .tooFarLeading:
-                spacer.tooLeading = min(spacer.tooLeading ?? .infinity, spacer.position)
-            case .tooFarTrailing:
-                spacer.tooTrailing = max(spacer.tooTrailing, spacer.position)
-            }
-            guard spacer.attempts < Lengths.maxSpacerPlacementAttempts else {
-                continue
-            }
-            let next: CGFloat
-            if let tooLeading = spacer.tooLeading {
-                next = (spacer.tooTrailing + tooLeading) / 2
-            } else {
-                next = max(spacer.position * 2, spacer.position + 100)
-            }
-            guard abs(next - spacer.position) >= 0.5 else {
-                continue // The range has closed without a hit; give up.
-            }
-            Self.logger.info(
-                """
-                Spacer \(spacer.tag.title, privacy: .public) landed \(String(describing: placement), privacy: .public) \
-                at position \(spacer.position, privacy: .public); trying \(next, privacy: .public)
-                """
-            )
-            removeSpacer(spacer)
-            var replacement = createSpacer(tag: spacer.tag, position: next)
-            replacement.tooTrailing = spacer.tooTrailing
-            replacement.tooLeading = spacer.tooLeading
-            replacement.attempts = spacer.attempts + 1
-            replacement.statusItem.length = spacer.statusItem.length
-            spacers[index] = replacement
-            changed = true
-        }
-        if changed {
-            recacheSoon()
+            spacers[index].isPlaced = true
+            ControlItemDefaults[.hostedSpacerPosition, spacers[index].tag.title] = spacers[index].position
         }
     }
 

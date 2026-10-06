@@ -41,6 +41,16 @@ enum HostedItemReader {
         AXHelpers.setMessagingTimeout(messagingTimeout, for: agent)
 
         let agentPID = agentApp.processIdentifier
+        // The app's own items are named by the accessibility identifier of
+        // their buttons, which is the only way to tell its dividers and
+        // spacers apart on a display other than the one holding their
+        // status windows. Reading it messages the app, which is fine: it is
+        // the one waiting for this read.
+        let hostPIDs = Set(
+            NSRunningApplication
+                .runningApplications(withBundleIdentifier: HostedMenuBarItem.hostBundleIdentifier)
+                .map(\.processIdentifier)
+        )
         var items = [HostedMenuBarItem]()
 
         for (hostIndex, window) in AXHelpers.windows(for: agent).enumerated() {
@@ -66,6 +76,9 @@ enum HostedItemReader {
                     // a stable identifier ("com.apple.menuextra.clock").
                     let extra = AXHelpers.children(for: content).first ?? content
                     identifier = AXHelpers.identifier(for: extra)
+                } else if hostPIDs.contains(sourcePID), let content {
+                    identifier = AXHelpers.identifier(for: content)
+                        ?? AXHelpers.children(for: content).first.flatMap(AXHelpers.identifier(for:))
                 }
                 items.append(
                     HostedMenuBarItem(

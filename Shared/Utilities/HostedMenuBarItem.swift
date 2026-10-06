@@ -55,4 +55,12 @@ struct HostedMenuBarItem: Codable, Hashable {
 extension HostedMenuBarItem {
     /// The bundle identifier of the `MenuBarAgent` process.
     static let agentBundleIdentifier = "com.apple.MenuBarAgent"
+
+    /// The bundle identifier of the app whose items the reader names by
+    /// their accessibility identifiers: the service's own, less its last
+    /// component.
+    static let hostBundleIdentifier: String = {
+        let own = Bundle.main.bundleIdentifier ?? "com.pnikolaidis.icemelt.MenuBarItemService"
+        return own.hasSuffix(".MenuBarItemService") ? String(own.dropLast(".MenuBarItemService".count)) : own
+    }()
 }

@@ -133,7 +133,7 @@ final class HIDEventManager: ObservableObject {
             isEnabled,
             let appState,
             event.getIntegerValueField(.eventSourceUnixProcessID) != Int64(getpid()),
-            MenuBarItem.hostedOverflowChevronFrames.values.contains(where: { $0.contains(event.location) }),
+            isOverflowChevron(at: event.location),
             let section = appState.menuBarManager.section(withName: .hidden)
         else {
             return event
@@ -144,6 +144,36 @@ final class HIDEventManager: ObservableObject {
         }
         isSwallowingChevronClick = true
         return nil
+    }
+
+    /// Returns whether the system overflow chevron is under the given point
+    /// (macOS 27), asked of the accessibility hit test at the moment of the
+    /// click.
+    ///
+    /// The chevron's frame as of the last read goes stale: on a wide
+    /// display it moves whenever the bar reflows, and a click there caught
+    /// clicks meant for other things and missed the chevron. The chevron
+    /// is the one plain button MenuBarAgent owns itself: an app's item is
+    /// an element of that app, and a system item is a menu bar item.
+    private func isOverflowChevron(at point: CGPoint) -> Bool {
+        // Only within a menu bar, which only the agent owns: the hit test asks
+        // the process under the point, and an app elsewhere could be
+        // unresponsive. This runs for every click.
+        let inMenuBar = NSScreen.screens.contains { screen in
+            let bounds = CGDisplayBounds(screen.displayID)
+            let height = screen.getMenuBarHeight() ?? 40
+            return point.x >= bounds.minX && point.x < bounds.maxX && point.y >= bounds.minY && point.y < bounds.minY + height
+        }
+        guard
+            inMenuBar,
+            let element = AXHelpers.element(at: point),
+            AXHelpers.role(for: element) == .button,
+            let pid = AXHelpers.pid(for: element),
+            NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == HostedMenuBarItem.agentBundleIdentifier
+        else {
+            return false
+        }
+        return true
     }
 
     /// Monitor for scroll wheel events.
