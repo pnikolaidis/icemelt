@@ -15,6 +15,8 @@ IceMelt is a fork of [Ice](https://github.com/jordanbaird/Ice) by Jordan Baird, 
 
 > [!NOTE]
 > IceMelt is in active development. Download the latest release [here](https://github.com/pnikolaidis/icemelt/releases/latest), and see the roadmap below for upcoming work.
+>
+> **What's new:** macOS 27 support and a round of fixes. See the [announcement](https://github.com/pnikolaidis/icemelt/discussions/57).
 
 ## Install
 
