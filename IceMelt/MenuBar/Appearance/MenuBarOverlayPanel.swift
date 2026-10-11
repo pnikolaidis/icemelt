@@ -297,7 +297,7 @@ final class MenuBarOverlayPanel: NSPanel {
 
     /// Stores the leading edge of the visible hosted items (macOS 27 and
     /// later): the on-screen items right of the hidden divider, or all of
-    /// them while the divider is overflowed.
+    /// them while the divider is overflowed, and the « beside them.
     func updateHostedItemsMinX() {
         guard #available(macOS 27.0, *) else {
             return
@@ -315,6 +315,17 @@ final class MenuBarOverlayPanel: NSPanel {
                 }
                 .map(\.bounds.minX)
                 .min()
+                .map { minX in
+                    // Cover the « too when it sits right beside the items.
+                    guard
+                        let chevron = MenuBarItem.hostedOverflowChevronFrames[displayID],
+                        chevron.maxX <= minX + 1,
+                        minX - chevron.maxX < 16
+                    else {
+                        return minX
+                    }
+                    return chevron.minX
+                }
             if hostedItemsMinX != minX {
                 hostedItemsMinX = minX
             }
