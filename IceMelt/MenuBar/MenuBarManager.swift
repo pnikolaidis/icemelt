@@ -264,7 +264,9 @@ final class MenuBarManager: ObservableObject {
     func hasValidMenuBar(in windows: [WindowInfo], for display: CGDirectDisplayID) -> Bool {
         guard
             let window = WindowInfo.menuBarWindow(from: windows, for: display),
-            let element = AXHelpers.element(at: window.bounds.origin)
+            // One point in: on macOS 27 the exact corner belongs to
+            // MenuBarAgent's window, not the menu bar.
+            let element = AXHelpers.element(at: window.bounds.origin.applying(.init(translationX: 1, y: 1)))
         else {
             return false
         }

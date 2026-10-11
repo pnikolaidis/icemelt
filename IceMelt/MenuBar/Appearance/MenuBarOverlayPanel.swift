@@ -64,6 +64,11 @@ final class MenuBarOverlayPanel: NSPanel {
     /// The frame of the application menu.
     @Published private(set) var applicationMenuFrame: CGRect?
 
+    /// The leading edge of the visible menu bar items on the panel's
+    /// display, for macOS 27 and later, where the items are hosted by
+    /// `MenuBarAgent` and have no windows to measure.
+    @Published private(set) var hostedItemsMinX: CGFloat?
+
     /// The current desktop wallpaper, clipped to the bounds of the menu bar.
     @Published private(set) var desktopWallpaper: CGImage?
 
@@ -287,6 +292,33 @@ final class MenuBarOverlayPanel: NSPanel {
             return
         }
         applicationMenuFrame = screen.getApplicationMenuFrame()
+        updateHostedItemsMinX()
+    }
+
+    /// Stores the leading edge of the visible hosted items (macOS 27 and
+    /// later): the on-screen items right of the hidden divider, or all of
+    /// them while the divider is overflowed.
+    func updateHostedItemsMinX() {
+        guard #available(macOS 27.0, *) else {
+            return
+        }
+        let displayID = owningScreen.displayID
+        Task {
+            let items = await MenuBarItem.getHostedMenuBarItemsByDisplay()[displayID] ?? []
+            let divider = items.first { $0.tag == .hiddenControlItem && $0.isOnScreen }
+            let minX = items
+                .filter { item in
+                    item.isOnScreen &&
+                    item.tag != .hiddenControlItem &&
+                    item.tag != .alwaysHiddenControlItem &&
+                    divider.map { item.bounds.minX >= $0.bounds.maxX - 1 } ?? true
+                }
+                .map(\.bounds.minX)
+                .min()
+            if hostedItemsMinX != minX {
+                hostedItemsMinX = minX
+            }
+        }
     }
 
     /// Stores the area of the desktop wallpaper that is under the menu bar
@@ -414,6 +446,7 @@ private final class MenuBarOverlayPanelContentView: NSView {
                         .receive(on: DispatchQueue.main)
                         .sink { [weak self] _ in
                             self?.needsDisplay = true
+                            self?.overlayPanel?.updateHostedItemsMinX()
                         }
                         .store(in: &c)
                 }
@@ -421,6 +454,12 @@ private final class MenuBarOverlayPanelContentView: NSView {
 
             // Redraw whenever the application menu frame changes.
             overlayPanel.$applicationMenuFrame
+                .sink { [weak self] _ in
+                    self?.needsDisplay = true
+                }
+                .store(in: &c)
+            // Redraw whenever the hosted items move (macOS 27).
+            overlayPanel.$hostedItemsMinX
                 .sink { [weak self] _ in
                     self?.needsDisplay = true
                 }
@@ -556,14 +595,23 @@ private final class MenuBarOverlayPanelContentView: NSView {
             return CGRect(x: rect.minX, y: rect.minY, width: maxX, height: rect.height)
         }()
         let trailingPathBounds: CGRect = {
-            let itemWindows = MenuBarItem.getMenuBarItemWindows(on: screen.displayID, option: .onScreen)
-            guard !itemWindows.isEmpty else {
-                return .zero
+            var position: CGFloat
+            if #available(macOS 27.0, *) {
+                guard let minX = overlayPanel?.hostedItemsMinX else {
+                    return .zero
+                }
+                // Hosted bounds are global; the rect is in the panel's space.
+                position = minX - screen.frame.minX
+            } else {
+                let itemWindows = MenuBarItem.getMenuBarItemWindows(on: screen.displayID, option: .onScreen)
+                guard !itemWindows.isEmpty else {
+                    return .zero
+                }
+                let totalWidth = itemWindows.reduce(into: 0) { width, item in
+                    width += item.bounds.width
+                }
+                position = rect.maxX - totalWidth
             }
-            let totalWidth = itemWindows.reduce(into: 0) { width, item in
-                width += item.bounds.width
-            }
-            var position = rect.maxX - totalWidth
             if shouldInset {
                 position += 4
                 if info.trailing.trailingEndCap == .square {
