@@ -75,6 +75,11 @@ enum AXHelpers {
         queue.sync { try? element.role() }
     }
 
+    /// Performs the element's press action, returning whether it succeeded.
+    static func press(_ element: UIElement) -> Bool {
+        queue.sync { (try? element.performAction(.press)) != nil }
+    }
+
     /// Returns the identifier of the window backing the given element, if the
     /// system has a mapping for it. Returns `nil` for most menu bar items as
     /// of macOS 26 (see `_AXUIElementGetWindow`).
