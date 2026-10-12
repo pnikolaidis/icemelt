@@ -57,6 +57,40 @@ Relative to upstream Ice (0.11.x and the unreleased `macos-26` branch):
 
 Phase-by-phase plans live in [`PLAN.md`](PLAN.md); the current snapshot is in [`docs/STATUS.md`](docs/STATUS.md).
 
+## macOS 27: what changed, and what IceMelt still adds
+
+macOS 27 rebuilt the menu bar, and that changes how IceMelt works.
+
+**What macOS 27 does on its own**
+
+- One system process, MenuBarAgent, now draws every menu bar icon. Icons are no longer separate windows, so no app (IceMelt included) can move them off-screen anymore.
+- macOS has its own **«** button. When icons don't fit, it moves the leftmost ones into an overflow behind the «. Clicking « shows them on the left side of the menu bar.
+- You can ⌘-drag icons to reorder them, so the ones you care least about end up on the left and overflow first.
+- There is no setting for the «. It appears whenever icons don't fit, even with IceMelt quit, and IceMelt can't remove or restyle it.
+
+**How IceMelt hides icons on macOS 27**
+
+1. It places an invisible divider left of your visible icons.
+2. It widens that divider (with blank spacers on large displays) until the bar has no room left.
+3. macOS then pushes everything left of the divider, your hidden icons, into its overflow.
+
+The « you see is always macOS's own. IceMelt drives it from the outside, with clicks and ⌘-drags, which is why it sometimes moves the pointer or briefly rearranges the bar.
+
+**Pros and cons**
+
+| | macOS 27 alone | With IceMelt |
+|---|---|---|
+| Hide icons on a MacBook (notch) | Yes, if there are more icons than fit. Leftmost overflow first | Yes. You pick which icons hide |
+| Hide icons on a large display | No. Everything fits, so nothing overflows | Yes |
+| Hide icons with only a few running | No | Yes |
+| Always-hidden section | No | Yes |
+| Where hidden icons appear | Far left of the menu bar | Far left too (macOS decides, [#52](https://github.com/pnikolaidis/icemelt/issues/52)), or in the IceMelt Bar below the menu bar |
+| Show on hover, click, scroll or notch click; auto-rehide; hotkeys; search | No | Yes |
+| Menu bar tint, shadow, border and shapes | No | Yes |
+| Moves your pointer or rearranges the bar | No | Sometimes, while moving icons or placing spacers (it asks first) |
+
+**In short:** on a MacBook with many menu bar icons, macOS 27 now covers basic hiding by itself: reorder with ⌘-drag and let the « do the rest. IceMelt is still worth it if you use a large display, want an always-hidden section, want hidden icons below the menu bar instead of at the far left, or use its hover, hotkey, search or appearance features.
+
 ## Features/Roadmap
 
 ### Menu bar item management
