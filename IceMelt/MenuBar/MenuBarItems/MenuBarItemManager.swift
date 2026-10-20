@@ -2101,6 +2101,11 @@ extension MenuBarItemManager {
         /// The number of attempts that have been made to rehide the item.
         var rehideAttempts = 0
 
+        /// The number of rounds of rehide attempts that failed. A hosted
+        /// item is given up on after a few: each try hides the pointer and
+        /// takes focus from the user.
+        var failedRehideRounds = 0
+
         /// When the item was temporarily shown.
         ///
         /// Used to cap how long a shown interface may defer the rehide.
@@ -2414,9 +2419,6 @@ extension MenuBarItemManager {
     ///   - item: The item to temporarily show.
     ///   - mouseButton: The mouse button to click the item with.
     func temporarilyShow(item: MenuBarItem, clickingWith mouseButton: CGMouseButton) async {
-        // On macOS 27 a hosted item is moved onto the bar beside the visible
-        // items, as before, so only it appears rather than the whole
-        // overflow; if that fails, it's clicked in the expanded overflow.
         // An item being moved back finishes first (see
         // ``isTemporarilyShowing``).
         let rehideDeadline = ContinuousClock.now + .seconds(20)
@@ -2425,6 +2427,14 @@ extension MenuBarItemManager {
         }
         guard let appState else {
             logger.error("Missing AppState, so not showing \(item.logString, privacy: .public)")
+            return
+        }
+        // A hosted item is clicked where the expanded overflow lays it out.
+        // Moving it beside the visible items took several ⌘-drags on a wide
+        // display, each hiding the pointer and taking focus, and moving it
+        // back often failed.
+        if item.isHosted {
+            await showHostedInOverflow(item, clickingWith: mouseButton)
             return
         }
         guard let screen = NSScreen.screenWithActiveMenuBar else {
@@ -2654,7 +2664,12 @@ extension MenuBarItemManager {
                     // Failed contexts are ultimately added back to the array
                     // and rehidden after a longer delay, so reset the count.
                     context.rehideAttempts = 0
-                    failedContexts.append(context)
+                    context.failedRehideRounds += 1
+                    if item.isHosted, context.failedRehideRounds >= 3 {
+                        logger.error("Giving up rehiding \(item.logString, privacy: .public)")
+                    } else {
+                        failedContexts.append(context)
+                    }
                 }
             }
         }
