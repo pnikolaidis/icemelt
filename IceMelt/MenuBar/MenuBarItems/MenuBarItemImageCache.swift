@@ -43,6 +43,15 @@ final class MenuBarItemImageCache: ObservableObject {
     /// The cached item images, keyed by their corresponding tags.
     @Published private(set) var images = [MenuBarItemTag: CapturedImage]()
 
+    /// Images of hosted items (macOS 27), cut from `MenuBarAgent`'s bar
+    /// whenever the items are laid out, with the time of capture. Kept
+    /// across updates: an item stacked in the collapsed overflow can't be
+    /// captured, so its last capture stands in until it is laid out again.
+    @MainActor private var hostedImages = [MenuBarItemTag: (image: CapturedImage, date: Date)]()
+
+    /// Whether a capture of hosted items is in progress.
+    @MainActor private var isCapturingHostedItems = false
+
     /// Logger for the menu bar item image cache.
     private let logger = Logger(category: "MenuBarItemImageCache")
 
@@ -100,6 +109,25 @@ final class MenuBarItemImageCache: ObservableObject {
                 }
             }
             .store(in: &c)
+
+            if #available(macOS 27.0, *) {
+                // Hosted items can only be captured while laid out, which for
+                // hidden ones is brief, so watch for it whatever is presented.
+                Publishers.Merge(
+                    Timer.publish(every: 3, on: .main, in: .default).autoconnect().replace(with: ()),
+                    appState.itemManager.$itemCache.removeDuplicates().replace(with: ())
+                )
+                .throttle(for: 0.5, scheduler: DispatchQueue.main, latest: true)
+                .sink { [weak self] in
+                    guard let self else {
+                        return
+                    }
+                    Task {
+                        await self.captureHostedItems(appState: appState)
+                    }
+                }
+                .store(in: &c)
+            }
         }
 
         cancellables = c
@@ -220,9 +248,18 @@ final class MenuBarItemImageCache: ObservableObject {
     private nonisolated func captureImages(of items: [MenuBarItem], scale: CGFloat, appState: AppState) async -> CaptureResult {
         // Hosted items (macOS 27) have no windows to capture. Exclude them all
         // so they get the app-icon fallback, without a round of failed captures.
+        // Use the captures cut from MenuBarAgent's bar, and the app-icon
+        // fallback for items not yet laid out since launch.
         if items.allSatisfy(\.isHosted) {
+            let stored = await MainActor.run { hostedImages }
             var result = CaptureResult()
-            result.excluded = items
+            for item in items {
+                if let image = stored[item.tag]?.image {
+                    result.images[item.tag] = image
+                } else {
+                    result.excluded.append(item)
+                }
+            }
             return result
         }
 
@@ -361,6 +398,176 @@ final class MenuBarItemImageCache: ObservableObject {
         }
 
         return images
+    }
+
+    // MARK: Hosted Items
+
+    /// Captures the hosted items (macOS 27) laid out on the active menu
+    /// bar, from `MenuBarAgent`'s window for that display.
+    ///
+    /// Only items whose frames held still for a moment are captured, so a
+    /// reflow in progress isn't, and each at most every 20 seconds.
+    @available(macOS 27.0, *)
+    private func captureHostedItems(appState: AppState) async {
+        let canStart = await MainActor.run {
+            guard !isCapturingHostedItems else {
+                return false
+            }
+            isCapturingHostedItems = true
+            return true
+        }
+        guard canStart else {
+            return
+        }
+        defer {
+            Task { @MainActor in
+                isCapturingHostedItems = false
+            }
+        }
+
+        guard await appState.hasPermission(.screenRecording) else {
+            return
+        }
+
+        let before = await appState.itemManager.itemCache
+        try? await Task.sleep(for: .milliseconds(400))
+        let cache = await appState.itemManager.itemCache
+
+        guard
+            await !appState.itemManager.lastMoveOperationOccurred(within: .seconds(1)),
+            let displayID = cache.displayID,
+            displayID == before.displayID,
+            let windowID = Self.agentWindowID(for: displayID)
+        else {
+            return
+        }
+
+        let boundsBefore = Dictionary(before.managedItems.map { ($0.tag, $0.bounds) }) { first, _ in first }
+        let stored = await MainActor.run { hostedImages }
+        let now = Date()
+        var captured = [MenuBarItemTag: CapturedImage]()
+
+        for item in cache.managedItems {
+            guard
+                item.isHosted,
+                item.isOnScreen || item.hasSlot,
+                item.tag != .hiddenControlItem,
+                item.tag != .alwaysHiddenControlItem,
+                !item.tag.isHostedSpacer,
+                item.bounds.width >= 1,
+                boundsBefore[item.tag] == item.bounds,
+                stored[item.tag].map({ now.timeIntervalSince($0.date) > 20 }) ?? true,
+                let image = ScreenCapture.captureWindow(with: windowID, screenBounds: item.bounds, option: captureOption),
+                let cutOut = Self.removingBackground(from: image)
+            else {
+                continue
+            }
+            captured[item.tag] = CapturedImage(cgImage: cutOut, scale: CGFloat(cutOut.width) / item.bounds.width)
+        }
+
+        guard !captured.isEmpty else {
+            return
+        }
+        logger.debug("Captured \(captured.count, privacy: .public) hosted item images")
+        await MainActor.run { [captured] in
+            for (tag, image) in captured {
+                hostedImages[tag] = (image, now)
+            }
+            images.merge(captured) { _, new in new }
+        }
+    }
+
+    /// Returns the identifier of `MenuBarAgent`'s bar window on the given
+    /// display.
+    private nonisolated static func agentWindowID(for displayID: CGDirectDisplayID) -> CGWindowID? {
+        guard
+            let agent = NSRunningApplication.runningApplications(withBundleIdentifier: HostedMenuBarItem.agentBundleIdentifier).first,
+            let list = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]]
+        else {
+            return nil
+        }
+        let displayBounds = CGDisplayBounds(displayID)
+        for info in list {
+            guard
+                info[kCGWindowOwnerPID as String] as? pid_t == agent.processIdentifier,
+                let boundsDictionary = info[kCGWindowBounds as String] as? NSDictionary,
+                let bounds = CGRect(dictionaryRepresentation: boundsDictionary),
+                bounds.origin == displayBounds.origin,
+                bounds.width == displayBounds.width,
+                let windowID = info[kCGWindowNumber as String] as? CGWindowID
+            else {
+                continue
+            }
+            return windowID
+        }
+        return nil
+    }
+
+    /// Returns the image with the menu bar's background made transparent,
+    /// or `nil` if nothing but background was captured.
+    ///
+    /// `MenuBarAgent` draws the bar's background in the same window as the
+    /// items. The background is sampled from the image's left and right
+    /// edges (an item's frame includes its padding) and removed by
+    /// color-to-alpha, which keeps the icon's own colors and antialiasing.
+    private nonisolated static func removingBackground(from image: CGImage) -> CGImage? {
+        let width = image.width
+        let height = image.height
+        guard
+            width > 4, height > 0,
+            let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+            let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ),
+            let data = context.data
+        else {
+            return nil
+        }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        let pixels = data.bindMemory(to: UInt8.self, capacity: width * height * 4)
+
+        var background = [Double](repeating: 0, count: 3)
+        let edgeColumns = [0, 1, width - 2, width - 1]
+        for y in 0..<height {
+            for x in edgeColumns {
+                for channel in 0..<3 {
+                    background[channel] += Double(pixels[(y * width + x) * 4 + channel])
+                }
+            }
+        }
+        background = background.map { $0 / Double(height * edgeColumns.count * 255) }
+
+        var maxAlpha = 0.0
+        for index in stride(from: 0, to: width * height * 4, by: 4) {
+            var alpha = 0.0
+            for channel in 0..<3 {
+                let value = Double(pixels[index + channel]) / 255
+                let base = background[channel]
+                let channelAlpha = value > base ? (value - base) / (1 - base) : (base - value) / base
+                if channelAlpha.isFinite {
+                    alpha = max(alpha, channelAlpha)
+                }
+            }
+            alpha = min(alpha, 1)
+            maxAlpha = max(maxAlpha, alpha)
+            for channel in 0..<3 {
+                // Premultiplied foreground: value − (1 − alpha) × background.
+                let value = Double(pixels[index + channel]) / 255 - (1 - alpha) * background[channel]
+                pixels[index + channel] = UInt8(max(0, min(alpha, value)) * 255)
+            }
+            pixels[index + 3] = UInt8(alpha * 255)
+        }
+
+        guard maxAlpha > 0.25 else {
+            return nil
+        }
+        return context.makeImage()
     }
 
     // MARK: Update Cache
