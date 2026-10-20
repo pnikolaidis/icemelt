@@ -80,6 +80,13 @@ final class MenuBarItemManager: ObservableObject {
     /// spacer fitted. IceMelt asks only once the verdict has held.
     private var spacersMisplacedSince: ContinuousClock.Instant?
 
+    /// When the hidden section or the overflow last stopped being shown,
+    /// or an item was last clicked in the overflow (macOS 27). Spacers are
+    /// left alone for a while after: an open overflow or a shown section
+    /// makes them look misplaced, and a drag then hides the pointer in the
+    /// middle of what the user is doing.
+    private var lastHostedOverflowActivity: ContinuousClock.Instant?
+
     /// When the item manager was created: IceMelt doesn't ask in the first
     /// seconds, while the bar is still settling after launch or login.
     private let createdAt = ContinuousClock.now
@@ -592,6 +599,11 @@ extension MenuBarItemManager {
                     items: items,
                     controlItems: controlItems
                 )
+                let isOverflowOrSectionShown = appState?.menuBarManager.section(withName: .hidden)?.isHidden == false ||
+                    items.contains { !$0.isControlItem && !$0.tag.isHostedSpacer && $0.hasSlot && !$0.isOnScreen }
+                if isOverflowOrSectionShown {
+                    lastHostedOverflowActivity = .now
+                }
                 dragMisplacedHostedSpacer(hostedSpacers, placements: hostedSpacerPlacements, controlItems: controlItems)
             }
         }
@@ -615,6 +627,7 @@ extension MenuBarItemManager {
         guard
             !isDraggingHostedSpacer, !isTemporarilyShowing, !isRehidingTemporarilyShownItems,
             temporarilyShownItemContexts.isEmpty, hostedShownSectionContexts.isEmpty,
+            lastHostedOverflowActivity.map({ $0.duration(to: .now) > .seconds(10) }) ?? true,
             divider.hasSlot, divider.isOnScreen
         else {
             if placements.values.contains(where: { $0 != .fits }) {
@@ -2867,6 +2880,10 @@ extension MenuBarItemManager {
         guard let appState else {
             logger.error("Missing AppState, so not showing \(item.logString, privacy: .public)")
             return
+        }
+        lastHostedOverflowActivity = .now
+        defer {
+            lastHostedOverflowActivity = .now
         }
         let menuBarManager = appState.menuBarManager
         let sectionName = itemCache.address(for: item.tag)?.section ?? .hidden

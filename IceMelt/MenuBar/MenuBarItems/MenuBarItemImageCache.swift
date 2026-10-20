@@ -114,7 +114,7 @@ final class MenuBarItemImageCache: ObservableObject {
                 // Hosted items can only be captured while laid out, which for
                 // hidden ones is brief, so watch for it whatever is presented.
                 Publishers.Merge(
-                    Timer.publish(every: 3, on: .main, in: .default).autoconnect().replace(with: ()),
+                    Timer.publish(every: 10, on: .main, in: .default).autoconnect().replace(with: ()),
                     appState.itemManager.$itemCache.removeDuplicates().replace(with: ())
                 )
                 .throttle(for: 0.5, scheduler: DispatchQueue.main, latest: true)
@@ -429,41 +429,49 @@ final class MenuBarItemImageCache: ObservableObject {
             return
         }
 
-        let before = await appState.itemManager.itemCache
-        try? await Task.sleep(for: .milliseconds(400))
-        let cache = await appState.itemManager.itemCache
-
+        // Read the bar afresh, twice, and capture only items whose slots
+        // held still between the reads and through the capture: the cache's
+        // frames can be stale, and a capture at a stale frame shows one
+        // item's image on another's button.
         guard
-            await !appState.itemManager.lastMoveOperationOccurred(within: .seconds(1)),
-            let displayID = cache.displayID,
-            displayID == before.displayID,
+            await !appState.itemManager.lastMoveOperationOccurred(within: .seconds(3)),
+            let displayID = Bridging.getActiveMenuBarDisplayID(),
             let windowID = Self.agentWindowID(for: displayID)
         else {
             return
         }
+        func readFrames() async -> [MenuBarItemTag: CGRect] {
+            let items = await MenuBarItem.getHostedMenuBarItemsByDisplay()[displayID] ?? []
+            return Dictionary(
+                items.filter { $0.isOnScreen || $0.hasSlot }.map { ($0.tag, $0.bounds) }
+            ) { first, _ in first }
+        }
+        let first = await readFrames()
+        try? await Task.sleep(for: .milliseconds(500))
+        let second = await readFrames()
 
-        let boundsBefore = Dictionary(before.managedItems.map { ($0.tag, $0.bounds) }) { first, _ in first }
         let stored = await MainActor.run { hostedImages }
         let now = Date()
         var captured = [MenuBarItemTag: CapturedImage]()
 
-        for item in cache.managedItems {
+        for (tag, bounds) in second {
             guard
-                item.isHosted,
-                item.isOnScreen || item.hasSlot,
-                item.tag != .hiddenControlItem,
-                item.tag != .alwaysHiddenControlItem,
-                !item.tag.isHostedSpacer,
-                item.bounds.width >= 1,
-                boundsBefore[item.tag] == item.bounds,
-                stored[item.tag].map({ now.timeIntervalSince($0.date) > 20 }) ?? true,
-                let image = ScreenCapture.captureWindow(with: windowID, screenBounds: item.bounds, option: captureOption),
+                first[tag] == bounds,
+                tag != .hiddenControlItem,
+                tag != .alwaysHiddenControlItem,
+                !tag.isHostedSpacer,
+                bounds.width >= 1,
+                stored[tag].map({ now.timeIntervalSince($0.date) > 20 }) ?? true,
+                let image = ScreenCapture.captureWindow(with: windowID, screenBounds: bounds, option: captureOption),
                 let cutOut = Self.removingBackground(from: image)
             else {
                 continue
             }
-            captured[item.tag] = CapturedImage(cgImage: cutOut, scale: CGFloat(cutOut.width) / item.bounds.width)
+            captured[tag] = CapturedImage(cgImage: cutOut, scale: CGFloat(cutOut.width) / bounds.width)
         }
+
+        let third = await readFrames()
+        captured = captured.filter { third[$0.key] == second[$0.key] }
 
         guard !captured.isEmpty else {
             return
