@@ -560,15 +560,17 @@ extension NSScreen {
         let probes = [CGPoint(x: 2, y: 2), CGPoint(x: 5, y: 5), .zero].map { offset in
             CGPoint(x: displayBounds.origin.x + offset.x, y: displayBounds.origin.y + offset.y)
         }
-        guard let menuBar = probes.lazy.compactMap({ point -> UIElement? in
-            guard
-                let element = AXHelpers.element(at: point),
-                AXHelpers.role(for: element) == .menuBar
-            else {
-                return nil
+        // Not `lazy.compactMap(_:).first`, which evaluates the closure twice
+        // and force-unwraps the second result: the menu bar can stop
+        // answering in between, which crashed IceMelt.
+        var probedMenuBar: UIElement?
+        for point in probes {
+            if let element = AXHelpers.element(at: point), AXHelpers.role(for: element) == .menuBar {
+                probedMenuBar = element
+                break
             }
-            return element
-        }).first else {
+        }
+        guard let menuBar = probedMenuBar else {
             return nil
         }
 

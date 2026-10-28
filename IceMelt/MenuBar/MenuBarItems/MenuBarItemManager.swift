@@ -3317,6 +3317,18 @@ extension MenuBarItemManager {
             return
         }
         logger.debug("\(expanded ? "Opening" : "Closing", privacy: .public) the overflow")
+        // Press it through accessibility where possible: a click on the
+        // menu bar makes the menu bar's owner the front app, which pushed
+        // the window a hidden item had just opened behind it.
+        if
+            let element = AXHelpers.element(at: chevron.center),
+            AXHelpers.role(for: element) == .button,
+            let pid = AXHelpers.pid(for: element),
+            NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == HostedMenuBarItem.agentBundleIdentifier,
+            AXHelpers.press(element)
+        {
+            return
+        }
         do {
             try await postHostedClick(at: chevron.center, with: .left, for: anyItem)
         } catch {
