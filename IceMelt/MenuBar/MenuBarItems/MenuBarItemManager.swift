@@ -66,22 +66,23 @@ final class MenuBarItemManager: ObservableObject {
     /// How many times each spacer has been dragged, and when last.
     private var hostedSpacerDragAttempts = [MenuBarItemTag: (Int, ContinuousClock.Instant)]()
 
-    /// Whether the user has agreed to IceMelt arranging its spacers with
-    /// ⌘-drags (macOS 27). Each arrangement hides the pointer and reflows
-    /// the bar for a few seconds, so IceMelt asks first, once per launch:
-    /// the answer holds until the next one.
-    private enum SpacerArrangementConsent {
-        case unasked, asking, granted, declined
-    }
+    /// Whether a spacer is out of place and needs arranging (macOS 27).
+    /// IceMelt never arranges spacers on its own: each ⌘-drag hides the
+    /// pointer, takes focus and can open another app's menu, so it waits
+    /// for the user to ask, from the Menu Bar Layout pane.
+    @Published private(set) var hostedSpacersNeedArranging = false
 
-    private var spacerArrangementConsent = SpacerArrangementConsent.unasked
+    /// Whether the user has asked IceMelt to arrange its spacers. Holds
+    /// for one arrangement only: once every spacer fits, or the attempts
+    /// run out, IceMelt goes back to waiting.
+    private var isArrangingSpacersRequested = false
 
     /// When a spacer was first seen out of place since the last time every
-    /// spacer fitted. IceMelt asks only once the verdict has held.
+    /// spacer fitted. IceMelt reports a need only once the verdict has held.
     private var spacersMisplacedSince: ContinuousClock.Instant?
 
-    /// When the item manager was created: IceMelt doesn't ask in the first
-    /// seconds, while the bar is still settling after launch or login.
+    /// When the item manager was created: IceMelt doesn't report a need in
+    /// the first seconds, while the bar is still settling after launch or login.
     private let createdAt = ContinuousClock.now
 
     /// The last layout logged per display, so a layout is logged once.
@@ -638,35 +639,35 @@ extension MenuBarItemManager {
         let spacersInUse = (hostedHidingWidths[.hidden] ?? 0) > singleItemCap
         guard spacersInUse, placements.values.contains(where: { $0 != .fits }) else {
             spacersMisplacedSince = nil
+            hostedSpacersNeedArranging = false
+            isArrangingSpacersRequested = false
             return
         }
         let misplacedSince = spacersMisplacedSince ?? now
         spacersMisplacedSince = misplacedSince
-        switch spacerArrangementConsent {
-        case .declined, .asking:
-            return
-        case .unasked:
-            guard
-                createdAt.duration(to: now) > .seconds(15),
-                misplacedSince.duration(to: now) > .seconds(10)
-            else {
-                return
-            }
-            askToArrangeSpacers(count: placements.values.filter { $0 != .fits }.count)
-            return
-        case .granted:
-            // Not while the user is moving the mouse or typing: a drag they
-            // interrupt lands anywhere.
-            guard hasUserPausedInput(for: .seconds(2)) else {
-                return
-            }
+        if createdAt.duration(to: now) > .seconds(15), misplacedSince.duration(to: now) > .seconds(10) {
+            hostedSpacersNeedArranging = true
         }
-        guard let tag = placements.keys.sorted(by: { $0.title < $1.title }).first(where: { tag in
+        // Not while the user is moving the mouse or typing: a drag they
+        // interrupt lands anywhere.
+        guard isArrangingSpacersRequested, hasUserPausedInput(for: .seconds(2)) else {
+            return
+        }
+        let candidates = placements.keys.sorted(by: { $0.title < $1.title }).filter { tag in
             guard let placement = placements[tag], placement != .fits else {
                 return false
             }
+            return (hostedSpacerDragAttempts[tag]?.0 ?? 0) < 4
+        }
+        guard !candidates.isEmpty else {
+            // Out of attempts: stop until the user asks again.
+            logger.notice("Giving up arranging spacers until asked again")
+            isArrangingSpacersRequested = false
+            return
+        }
+        guard let tag = candidates.first(where: { tag in
             let attempts = hostedSpacerDragAttempts[tag] ?? (0, now - .seconds(60))
-            return attempts.0 < 4 && attempts.1.duration(to: now) > .seconds(12)
+            return attempts.1.duration(to: now) > .seconds(12)
         }) else {
             return
         }
@@ -728,35 +729,15 @@ extension MenuBarItemManager {
         }
     }
 
-    /// Asks the user whether IceMelt may arrange its spacers, explaining
-    /// what they'll see (macOS 27).
+    /// Arranges IceMelt's spacers with ⌘-drags, at the user's request from
+    /// the Menu Bar Layout pane (macOS 27).
     @available(macOS 27.0, *)
-    private func askToArrangeSpacers(count: Int) {
-        spacerArrangementConsent = .asking
-        logger.notice("Asking to arrange \(count, privacy: .public) spacer(s)")
-        let alert = NSAlert()
-        alert.messageText = "IceMelt needs to arrange the menu bar"
-        alert.informativeText = """
-            To hide items on this display, IceMelt has to move \(count == 1 ? "a blank spacer" : "\(count) blank spacers") \
-            next to its divider. While it does, your pointer will disappear for a few seconds and the menu bar \
-            will rearrange once or twice.
-
-            Please don't move the mouse until it's done. macOS remembers the arrangement, so this should only \
-            be needed again if your displays change.
-            """
-        alert.addButton(withTitle: "Arrange Now")
-        alert.addButton(withTitle: "Not Now")
-        // Shown outside the cache pass that found the need, so the passes
-        // carry on while the alert is up.
-        Task { @MainActor in
-            NSApp.activate(ignoringOtherApps: true)
-            let granted = alert.runModal() == .alertFirstButtonReturn
-            logger.notice("Spacer arrangement \(granted ? "granted" : "declined", privacy: .public)")
-            spacerArrangementConsent = granted ? .granted : .declined
-            guard granted else {
-                return
-            }
-            // Let the alert go and the user's hand leave the mouse.
+    func arrangeHostedSpacers() {
+        logger.notice("Arranging spacers on request")
+        isArrangingSpacersRequested = true
+        hostedSpacerDragAttempts.removeAll()
+        Task {
+            // Let the user's hand leave the mouse.
             try? await Task.sleep(for: .seconds(2))
             await cacheItemsRegardless()
         }
@@ -2101,6 +2082,9 @@ extension MenuBarItemManager {
         /// The number of attempts that have been made to rehide the item.
         var rehideAttempts = 0
 
+        /// The number of rehide rounds that have failed for the item.
+        var failedRehideRounds = 0
+
         /// When the item was temporarily shown.
         ///
         /// Used to cap how long a shown interface may defer the rehide.
@@ -2650,10 +2634,17 @@ extension MenuBarItemManager {
                 )
                 if context.rehideAttempts < 3 {
                     currentContexts.append(context) // Try again.
+                } else if item.isHosted, context.failedRehideRounds >= 1 {
+                    // Each hosted try is a ⌘-drag that presses items and takes
+                    // focus. Retrying a return that keeps failing did that
+                    // every 20 seconds, indefinitely, so after a second failed
+                    // round the item stays on the bar.
+                    logger.error("Giving up rehiding \(item.logString, privacy: .public), leaving it on the bar")
                 } else {
                     // Failed contexts are ultimately added back to the array
                     // and rehidden after a longer delay, so reset the count.
                     context.rehideAttempts = 0
+                    context.failedRehideRounds += 1
                     failedContexts.append(context)
                 }
             }
