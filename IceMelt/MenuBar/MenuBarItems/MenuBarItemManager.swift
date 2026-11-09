@@ -2210,11 +2210,28 @@ extension MenuBarItemManager {
                 // The divider's own window says where its content is: the
                 // agent's slot for it is wider than the content, and a press
                 // on the blank part of the slot drags nothing (2026-10-02).
-                let start: CGPoint
+                var start: CGPoint
                 if let frame = hiddenDivider?.window?.frame, let main = NSScreen.screens.first, frame.width > 0 {
                     start = CGPoint(x: frame.midX, y: main.frame.maxY - frame.midY)
                 } else {
                     start = hostedDragStart(for: divider, at: divider.bounds)
+                }
+                // The agent can report a slot for the divider while nothing
+                // of it is on the bar there (2026-11-09: Warp's menu bar
+                // under all of it). A drag from there grabs nothing and
+                // releases on the item, pressing it, so it is not posted.
+                func isDivider(at point: CGPoint) -> Bool {
+                    AXHelpers.element(at: point).flatMap(AXHelpers.pid(for:)) == ProcessInfo.processInfo.processIdentifier
+                }
+                if !isDivider(at: start) {
+                    guard let found = stride(from: divider.bounds.minX + 2, to: divider.bounds.maxX, by: 4)
+                        .map({ CGPoint(x: $0, y: start.y) })
+                        .first(where: isDivider(at:))
+                    else {
+                        logger.warning("Hidden divider not found under its slot, not dragging it")
+                        throw EventError.cannotComplete
+                    }
+                    start = found
                 }
                 try await postHostedDragEvents(
                     item: divider,
