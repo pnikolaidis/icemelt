@@ -2082,9 +2082,6 @@ extension MenuBarItemManager {
         /// The number of attempts that have been made to rehide the item.
         var rehideAttempts = 0
 
-        /// The number of rehide rounds that have failed for the item.
-        var failedRehideRounds = 0
-
         /// When the item was temporarily shown.
         ///
         /// Used to cap how long a shown interface may defer the rehide.
@@ -2632,19 +2629,17 @@ extension MenuBarItemManager {
                     \(error, privacy: .public)
                     """
                 )
-                if context.rehideAttempts < 3 {
-                    currentContexts.append(context) // Try again.
-                } else if item.isHosted, context.failedRehideRounds >= 1 {
-                    // Each hosted try is a ⌘-drag that presses items and takes
-                    // focus. Retrying a return that keeps failing did that
-                    // every 20 seconds, indefinitely, so after a second failed
-                    // round the item stays on the bar.
+                if item.isHosted {
+                    // Each hosted try is a ⌘-drag that presses items, opening
+                    // their menus, and takes focus. Retries did that every few
+                    // seconds, so after one failed try the item stays on the bar.
                     logger.error("Giving up rehiding \(item.logString, privacy: .public), leaving it on the bar")
+                } else if context.rehideAttempts < 3 {
+                    currentContexts.append(context) // Try again.
                 } else {
                     // Failed contexts are ultimately added back to the array
                     // and rehidden after a longer delay, so reset the count.
                     context.rehideAttempts = 0
-                    context.failedRehideRounds += 1
                     failedContexts.append(context)
                 }
             }
