@@ -105,9 +105,10 @@ final class ControlItem {
 
     /// The tags of the spacers currently in the menu bar (macOS 27),
     /// including any the agent leaves out of its list because they are in
-    /// the overflow.
+    /// the overflow, but not those taken off the bar while their section
+    /// is shown.
     static var hostedSpacerTags: Set<MenuBarItemTag> {
-        Set(liveSpacers.keys)
+        Set(liveSpacers.filter { $0.value.isVisible }.keys)
     }
 
     /// Converts a status window frame from AppKit's flipped coordinates to
@@ -142,6 +143,10 @@ final class ControlItem {
 
         /// The padding macOS 27 adds around a status item's length.
         static let hostedPadding: CGFloat = 16
+
+        /// The length of the hidden divider while its section is hidden
+        /// through the allowlist on macOS 27: room for its « alone.
+        static let allowlistMarker: CGFloat = 18
 
         /// The most items a divider may use to hide its section on macOS 27,
         /// itself included. Each item is kept under the cap of the narrowest
@@ -317,8 +322,8 @@ final class ControlItem {
     /// wider than half its display, so on a wide display the divider alone
     /// falls short — a 3840pt display needs ~2900pt of filling and allows
     /// 1904pt per item. The shortfall is made up with blank spacer items,
-    /// which fill the same room without being wider than the cap. The room is
-    /// divided evenly, so no spacer is near the cap unless it has to be.
+    /// which fill the same room without being wider than the cap. They are
+    /// sized so that as little blank as possible stays on the bar.
     ///
     /// A status item has one length on every display, so the cap is that of
     /// the narrowest display: an item over a display's cap is discarded there
@@ -352,6 +357,33 @@ final class ControlItem {
         // active display and the frontmost app, and a spacer removed and later
         // re-created loses its arranged place beside the divider. Unneeded
         // ones shrink to nothing instead.
+        if width > slot {
+            // Too much room for one item. The bar keeps the fillers that fit,
+            // trailing first, and the first that doesn't fit overflows with
+            // everything left of it, the hidden items included. The spacers
+            // all take the cap, and the divider, which sits beside the visible
+            // items, takes just enough that one spacer more than fits beside
+            // it overflows. The blank stretch left on the bar, between the
+            // system's « and the visible items, is then as short as the cap
+            // allows, whatever order the spacers landed in: fillers that each
+            // fit, split evenly, all stayed on the bar. The divider keeps room
+            // for its « marker. The room is the measured width plus its margin.
+            // Fewer fillers matter more than a narrower divider: a spacer
+            // created anew lands out of place.
+            let room = width + 8
+            let minimumDividerSlot = 24 + padding
+            var onBarSpacers = 0
+            while room + 24 - CGFloat(onBarSpacers + 1) * slot > slot, onBarSpacers < Lengths.maxHidingItems - 2 {
+                onBarSpacers += 1
+            }
+            let dividerSlot = max(room + 24 - CGFloat(onBarSpacers + 1) * slot, minimumDividerSlot)
+            let count = min(max(onBarSpacers + 2, spacers.count + 1), Lengths.maxHidingItems)
+            var lengths = (0..<count).map { index in
+                index == 0 ? dividerSlot - padding : index <= onBarSpacers + 1 ? cap : 0
+            }
+            lengths[0] = max(lengths[0] - hostedLengthReduction, 0)
+            return lengths
+        }
         let needed = max(Int((width / slot).rounded(.up)), spacers.count + 1, 1)
         let count = min(needed, Lengths.maxHidingItems)
         let length = min(max(width / CGFloat(count) - padding, 0), cap)
@@ -620,7 +652,14 @@ final class ControlItem {
         case .hidden, .alwaysHidden:
             switch state {
             case .showSection:
-                switch appState.settings.advanced.sectionDividerStyle {
+                // On macOS 27 the agent pads every item, so a shown section is
+                // set off from the visible items by a gap even without a
+                // divider. The chevron marks the gap as the section's edge.
+                var dividerStyle = appState.settings.advanced.sectionDividerStyle
+                if #available(macOS 27.0, *) {
+                    dividerStyle = .chevron
+                }
+                switch dividerStyle {
                 case .noDivider:
                     updateStatusItemVisibility(false)
                     button.appearsDisabled = true
@@ -644,10 +683,58 @@ final class ControlItem {
                 }
             case .hideSection:
                 updateStatusItemVisibility(true)
-                button.appearsDisabled = true
+                // Not dimmed while it draws the macOS 27 overflow marker.
+                button.appearsDisabled = button.image == nil
                 button.isHighlighted = false
             }
         }
+    }
+
+    /// Draws a « at the trailing end of the hidden divider while it fills
+    /// the room that hides its section (macOS 27), or clears it.
+    ///
+    /// The system's own « leads the items on the bar, so it sits left of
+    /// the divider's blank stretch, far from the visible items on a wide
+    /// display. The marker puts a « where the hidden items were, beside the
+    /// visible ones; clicking it shows the section, as clicking the divider
+    /// always has. It is not drawn while the divider overflows with its
+    /// section (see ``hostedDividerOverflowLength``), since the system's «
+    /// then already sits beside the visible items. Hiding through the
+    /// allowlist, the divider is the « alone.
+    @available(macOS 27.0, *)
+    private func updateHostedHidingMarker() {
+        guard let button = statusItem.button else {
+            return
+        }
+        let length = statusItem.length
+        guard
+            identifier == .hidden,
+            hostedDividerOverflowLength == nil || MenuBarAllowlist.isAvailable,
+            length >= Lengths.allowlistMarker,
+            let symbol = NSImage(systemSymbolName: "chevron.left.2", accessibilityDescription: "Show hidden items")?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold))
+        else {
+            button.image = nil
+            return
+        }
+        let height = NSStatusBar.system.thickness
+        let marker = NSImage(size: CGSize(width: length, height: height), flipped: false) { bounds in
+            let size = symbol.size
+            let rect = CGRect(
+                x: bounds.maxX - size.width - 4,
+                y: bounds.midY - size.height / 2,
+                width: size.width,
+                height: size.height
+            )
+            symbol.draw(in: rect)
+            return true
+        }
+        marker.isTemplate = true
+        marker.accessibilityDescription = "Show hidden items"
+        button.imagePosition = .imageOnly
+        // A press would highlight the divider across its whole blank width.
+        (button.cell as? NSButtonCell)?.highlightsBy = []
+        button.image = marker
     }
 
     /// Updates the visibility of the status item.
@@ -663,11 +750,26 @@ final class ControlItem {
             return
         }
 
+        // Hidden by leaving its apps off the bar (see `MenuBarAllowlist`),
+        // a section needs no room filled: the divider stays an ordinary
+        // item, and the hidden divider draws a « to show it with.
+        if #available(macOS 27.0, *), isSectionDivider, MenuBarAllowlist.isAvailable {
+            updateSpacers(lengths: [])
+            if isVisible, state == .hideSection, isAddedToMenuBar {
+                constraint?.isActive = true
+                statusItem.length = identifier == .hidden ? Lengths.allowlistMarker : 0
+                updateHostedHidingMarker()
+                return
+            }
+        }
+
         if #available(macOS 27.0, *), isSectionDivider, isVisible, state == .hideSection, isAddedToMenuBar {
             constraint?.isActive = true
             let lengths = hostedHidingLengths
             statusItem.length = lengths[0]
+            updateHostedHidingMarker()
             updateSpacers(lengths: Array(lengths.dropFirst()))
+            setSpacersVisible(true)
             return
         }
 
@@ -675,8 +777,11 @@ final class ControlItem {
             // Shown, the spacers shrink to nothing but stay, keeping their
             // arranged place for the next hide; removed and re-created, they
             // land out of place every time. Only a disabled section loses
-            // them.
+            // them. They are also taken off the bar, which keeps their place
+            // too: at no length each still takes the agent's padding, a
+            // blank gap between the shown section and its divider.
             updateSpacers(lengths: isAddedToMenuBar ? Array(repeating: 0, count: spacers.count) : [])
+            setSpacersVisible(false)
         }
 
         if isVisible {
@@ -739,6 +844,15 @@ final class ControlItem {
         }
         if added {
             recacheSoon()
+        }
+    }
+
+    /// Puts the divider's spacers on the bar, or takes them off it while
+    /// keeping their places (macOS 27).
+    @available(macOS 27.0, *)
+    private func setSpacersVisible(_ isVisible: Bool) {
+        for spacer in spacers where spacer.statusItem.isVisible != isVisible {
+            spacer.statusItem.isVisible = isVisible
         }
     }
 
@@ -831,6 +945,25 @@ final class ControlItem {
 
         switch event.type {
         case .leftMouseDown:
+            // While the hidden divider draws its « (macOS 27), only the « is
+            // a button. The rest of its span is blank menu bar, left to the
+            // show-on-click setting like any other empty space. The event's
+            // location can't tell them apart: the system hosts the divider,
+            // and the event doesn't land where the click was.
+            if
+                identifier == .hidden,
+                state == .hideSection,
+                statusItem.button?.image != nil,
+                let buttonFrames = appState?.itemManager.hostedDividerButtonFrames.values,
+                !buttonFrames.isEmpty
+            {
+                let location = NSEvent.mouseLocation
+                let primaryMaxY = NSScreen.screens.first?.frame.maxY ?? 0
+                let point = CGPoint(x: location.x, y: primaryMaxY - location.y)
+                guard buttonFrames.contains(where: { $0.insetBy(dx: -2, dy: -4).contains(point) }) else {
+                    return
+                }
+            }
             let modifierFlags = NSEvent.modifierFlags
 
             // Running this from a Task seems to improve the visual

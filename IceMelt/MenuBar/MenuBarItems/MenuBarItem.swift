@@ -402,12 +402,13 @@ extension MenuBarItem {
                 .runningApplications(withBundleIdentifier: HostedMenuBarItem.agentBundleIdentifier)
                 .first?.processIdentifier
             ?? 0
+        // Spacers are always matched, so that a spacer's slot can't be taken
+        // for a divider's, and are dropped afterwards unless asked for.
         var ownFrames = await ControlItem.hostedFrames.reduce(into: [MenuBarItemTag: CGRect]()) { result, entry in
             result[entry.key.tag] = entry.value
         }
-        if includingSpacers {
-            ownFrames.merge(await ControlItem.hostedSpacerFrames) { current, _ in current }
-        }
+        ownFrames.merge(await ControlItem.hostedSpacerFrames) { current, _ in current }
+        let ownTagsBySlot = matchOwnSlots(hostedByDisplay: hostedByDisplay, ownPID: ownPID, ownFrames: ownFrames)
 
         // Items of other processes are numbered within their namespace, so
         // two processes of one app (an app and its helper) can't collide.
@@ -490,15 +491,10 @@ extension MenuBarItem {
                     }
                     tag = named
                 } else if item.sourcePID == ownPID {
-                    // Match the slot to the nearest of our items by position. A
-                    // slot of ours that matches none is skipped: a spacer when
-                    // spacers weren't asked for, or a status window that has not
-                    // caught up with the agent's layout yet.
-                    let candidates = ownFrames.filter { _, frame in
-                        abs(frame.minX - item.frame.minX) <= 2 && abs(frame.minY - item.frame.minY) <= 40
-                    }
-                    guard let match = candidates.min(by: { abs($0.value.minX - item.frame.minX) < abs($1.value.minX - item.frame.minX) }) else {
-                        Logger.default.notice(
+                    // A slot of ours that matches none is skipped: a status
+                    // window that has not caught up with the agent's layout yet.
+                    guard let match = ownTagsBySlot[displayID]?[item] else {
+                        Logger.default.debug(
                             """
                             Unmatched own hosted slot on display \(displayID, privacy: .public) at \
                             \(NSStringFromRect(item.frame), privacy: .public); own frames: \
@@ -507,7 +503,10 @@ extension MenuBarItem {
                         )
                         return nil
                     }
-                    tag = match.key
+                    if match.isHostedSpacer, !includingSpacers {
+                        return nil
+                    }
+                    tag = match
                 } else {
                     let namespace = namespace(for: item)
                     let title: String
@@ -531,6 +530,100 @@ extension MenuBarItem {
         }
 
         return result
+    }
+
+    /// Returns the tag of each of IceMelt's own slots that carries no
+    /// accessibility identifier, keyed by display and then by slot.
+    ///
+    /// A slot is first matched to the status window whose frame it shares.
+    /// That works only on the display holding the windows: each item has
+    /// one window but a slot on every display, and a display that isn't
+    /// top-aligned with the main one has its bar at another y as well.
+    /// Every bar orders the items the same way, so the remaining slots are
+    /// matched by order, against the order seen where the frames matched
+    /// (or the windows' own order, when they share a display), and by width.
+    /// The order is walked from the trailing end, because a bar too narrow
+    /// for everything overflows the leading items first.
+    ///
+    /// - Parameters:
+    ///   - hostedByDisplay: The hosted items read from the agent, per display.
+    ///   - ownPID: IceMelt's process identifier.
+    ///   - ownFrames: The frames of IceMelt's status windows, by tag.
+    @available(macOS 27.0, *)
+    private static func matchOwnSlots(
+        hostedByDisplay: [CGDirectDisplayID: [HostedMenuBarItem]],
+        ownPID: pid_t,
+        ownFrames: [MenuBarItemTag: CGRect]
+    ) -> [CGDirectDisplayID: [HostedMenuBarItem: MenuBarItemTag]] {
+        var slotsByDisplay = [CGDirectDisplayID: [HostedMenuBarItem]]()
+        var matchesByDisplay = [CGDirectDisplayID: [HostedMenuBarItem: MenuBarItemTag]]()
+
+        for (displayID, items) in hostedByDisplay {
+            let slots = Array(Set(items.filter { $0.sourcePID == ownPID && $0.identifier == nil && !$0.isOverflowChevron }))
+                .sorted { $0.frame.minX < $1.frame.minX }
+            slotsByDisplay[displayID] = slots
+            var matches = [HostedMenuBarItem: MenuBarItemTag]()
+            for slot in slots {
+                let candidates = ownFrames.filter { tag, frame in
+                    !matches.values.contains(tag) &&
+                    abs(frame.minX - slot.frame.minX) <= 2 && abs(frame.minY - slot.frame.minY) <= 40
+                }
+                if let match = candidates.min(by: { abs($0.value.minX - slot.frame.minX) < abs($1.value.minX - slot.frame.minX) }) {
+                    matches[slot] = match.key
+                }
+            }
+            matchesByDisplay[displayID] = matches
+        }
+
+        // The order of our items, leading to trailing: from the display where
+        // the most slots matched by frame and none was left over, or else from
+        // the windows themselves when they all sit on one display.
+        let referenceOrder: [MenuBarItemTag]? = {
+            let complete = matchesByDisplay.filter { displayID, matches in
+                !matches.isEmpty && matches.count == slotsByDisplay[displayID]?.count
+            }
+            if let (displayID, matches) = complete.max(by: { $0.value.count < $1.value.count }) {
+                return (slotsByDisplay[displayID] ?? []).compactMap { matches[$0] }
+            }
+            let windowDisplays = Set(ownFrames.values.compactMap { frame in
+                NSScreen.screens.first { CGDisplayBounds($0.displayID).contains(CGPoint(x: frame.midX, y: frame.midY)) }?.displayID
+            })
+            guard windowDisplays.count == 1 else {
+                return nil
+            }
+            return ownFrames.sorted { $0.value.minX < $1.value.minX }.map(\.key)
+        }()
+        guard let referenceOrder else {
+            return matchesByDisplay
+        }
+
+        for (displayID, slots) in slotsByDisplay {
+            var matches = matchesByDisplay[displayID] ?? [:]
+            guard matches.count < slots.count else {
+                continue
+            }
+            let used = Set(matches.values)
+            var remaining = Array(referenceOrder.reversed())
+            for slot in slots.reversed() {
+                if let tag = matches[slot] {
+                    // Keep the walk in step with a slot that matched by frame.
+                    if let index = remaining.firstIndex(of: tag) {
+                        remaining.removeSubrange(...index)
+                    }
+                    continue
+                }
+                guard let index = remaining.firstIndex(where: { tag in
+                    !used.contains(tag) && ownFrames[tag].map { abs($0.width - slot.frame.width) <= 2 } == true
+                }) else {
+                    continue
+                }
+                matches[slot] = remaining[index]
+                remaining.removeSubrange(...index)
+            }
+            matchesByDisplay[displayID] = matches
+        }
+
+        return matchesByDisplay
     }
 
     /// Creates and returns a list of menu bar items hosted by `MenuBarAgent`,

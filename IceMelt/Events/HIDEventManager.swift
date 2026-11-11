@@ -100,6 +100,12 @@ final class HIDEventManager: ObservableObject {
     /// is still to come. See ``overflowChevronTap``.
     private var isSwallowingChevronClick = false
 
+    /// When a click on empty menu bar space last toggled a section. On
+    /// macOS 27 one click can reach the mouse down monitor twice, once as
+    /// a global and once as a local event, which toggled the section open
+    /// and shut again.
+    private var lastShowOnClickToggle: ContinuousClock.Instant?
+
     /// Tap that turns a click on the system overflow chevron into showing
     /// the hidden section (macOS 27).
     ///
@@ -265,6 +271,12 @@ extension HIDEventManager {
         else {
             return
         }
+
+        let now = ContinuousClock.now
+        if let last = lastShowOnClickToggle, last.duration(to: now) < .milliseconds(300) {
+            return
+        }
+        lastShowOnClickToggle = now
 
         Task {
             if NSEvent.modifierFlags == .control {
@@ -632,6 +644,11 @@ extension HIDEventManager {
             // proper but has a slot, and clicking it is clicking an item.
             let items = appState.itemManager.itemCache.managedItems
             if items.contains(where: { ($0.isOnScreen || $0.hasSlot) && $0.bounds.insetBy(dx: -8, dy: 0).contains(mouseLocation) }) {
+                return true
+            }
+            // The hidden divider's « or chevron is a button of its own,
+            // unlike the rest of its blank span.
+            if appState.itemManager.hostedDividerButtonFrames.values.contains(where: { $0.contains(mouseLocation) }) {
                 return true
             }
             // The overflow chevron is the system's, not an item of ours, but

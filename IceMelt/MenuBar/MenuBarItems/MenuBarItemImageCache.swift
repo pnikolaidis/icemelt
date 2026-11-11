@@ -288,7 +288,9 @@ final class MenuBarItemImageCache: ObservableObject {
             return nil
         }
 
-        let iconSide = min(itemSize.height * 0.65, itemSize.width) * scale
+        // App icons carry their own transparent margin, so they fill nearly
+        // the item's height to look as large as the menu bar's own glyphs.
+        let iconSide = min(itemSize.height * 0.9, itemSize.width) * scale
         var proposedRect = CGRect(x: 0, y: 0, width: iconSide, height: iconSide)
         guard let iconImage = icon.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil) else {
             return nil
@@ -337,7 +339,13 @@ final class MenuBarItemImageCache: ObservableObject {
     /// Items that can't be captured (individually, or wholesale when `canCapture`
     /// is `false`) fall back to a rendering of their source app's icon.
     private func captureImages(for section: MenuBarSection.Name, scale: CGFloat, appState: AppState, canCapture: Bool) async -> [MenuBarItemTag: CapturedImage] {
-        let items = await appState.itemManager.itemCache.managedItems(for: section)
+        // An item that stands in for an app the allowlist hides (macOS 27)
+        // isn't on the bar, so the image it had when last drawn is kept.
+        let standIns = await appState.itemManager.allowlistStandInTags
+        let pictured = await MainActor.run { Set(images.keys) }
+        let items = await appState.itemManager.itemCache.managedItems(for: section).filter { item in
+            !standIns.contains(item.tag) || !pictured.contains(item.tag)
+        }
 
         var images = [MenuBarItemTag: CapturedImage]()
         var excluded = items
