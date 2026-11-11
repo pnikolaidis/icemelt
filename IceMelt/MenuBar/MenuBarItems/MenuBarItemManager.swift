@@ -3771,6 +3771,7 @@ extension MenuBarItemManager {
                         // stays hidden.
                         MouseHelpers.hideCursor()
                         defer {
+                            MouseHelpers.warpCursor(to: mouseLocation)
                             MouseHelpers.showCursor()
                         }
                         try await postHostedDragEvents(
@@ -3835,11 +3836,17 @@ extension MenuBarItemManager {
                     return
                 }
                 do {
-                    MouseHelpers.hideCursor()
-                    defer {
-                        MouseHelpers.showCursor()
+                    do {
+                        // Hidden only while the drag runs: the wait for the bar to
+                        // settle below takes a read or two of the agent's tree,
+                        // each up to a second with several displays.
+                        MouseHelpers.hideCursor()
+                        defer {
+                            MouseHelpers.warpCursor(to: mouseLocation)
+                            MouseHelpers.showCursor()
+                        }
+                        try await postHostedDragEvents(item: item, from: hostedDragStart(for: item, at: current.bounds), to: hostedDropPoint(for: destination, target: target))
                     }
-                    try await postHostedDragEvents(item: item, from: hostedDragStart(for: item, at: current.bounds), to: hostedDropPoint(for: destination, target: target))
                     // The agent animates the bar after a drop and reports the old
                     // slots meanwhile. Judging a stale read says "elsewhere" for a
                     // drop that took, and a retry from the old slot drags whatever

@@ -92,6 +92,17 @@ struct MenuBarItem: CustomStringConvertible {
         windowID & Self.hostedWindowIDFlag != 0
     }
 
+    /// The stretch of the bar the item takes up, spacing included.
+    ///
+    /// On macOS 27 an item's slot includes the spacing around it, except for
+    /// the system's own items, whose slots leave out the 8 points either side.
+    var boundsWithSpacing: CGRect {
+        guard isHosted, tag.namespace == .menuBarAgent else {
+            return bounds
+        }
+        return bounds.insetBy(dx: -8, dy: 0)
+    }
+
     /// The application that owns the item.
     ///
     /// - Note: In macOS 26 and later, this property always returns the

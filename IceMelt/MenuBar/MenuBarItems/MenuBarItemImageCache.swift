@@ -306,11 +306,7 @@ final class MenuBarItemImageCache: ObservableObject {
         }
         let pictureScale = CGFloat(picture.width) / barWindow.bounds.width
         for item in items {
-            // The system's own items leave out the spacing around them that
-            // other items' slots include, so they'd sit tight against their
-            // neighbours.
-            let spacing: CGFloat = item.tag.namespace == .menuBarAgent ? 8 : 0
-            let local = item.bounds.insetBy(dx: -spacing, dy: 0)
+            let local = item.boundsWithSpacing
                 .offsetBy(dx: -barWindow.bounds.minX, dy: -barWindow.bounds.minY)
                 .intersection(CGRect(origin: .zero, size: barWindow.bounds.size))
             guard
@@ -342,7 +338,7 @@ final class MenuBarItemImageCache: ObservableObject {
             return nil
         }
 
-        var itemSize = item.bounds.size
+        var itemSize = item.boundsWithSpacing.size
         if itemSize.width < 1 || itemSize.height < 1 {
             itemSize = CGSize(width: 30, height: 24)
         }
