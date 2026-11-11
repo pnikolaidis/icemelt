@@ -6,6 +6,7 @@
 import Cocoa
 import Combine
 import OSLog
+import ScreenCaptureKit
 
 /// Cache for menu bar item images.
 final class MenuBarItemImageCache: ObservableObject {
@@ -218,9 +219,13 @@ final class MenuBarItemImageCache: ObservableObject {
 
     /// Captures the images of the given menu bar items and returns the result.
     private nonisolated func captureImages(of items: [MenuBarItem], scale: CGFloat, appState: AppState) async -> CaptureResult {
-        // Hosted items (macOS 27) have no windows to capture. Exclude them all
-        // so they get the app-icon fallback, without a round of failed captures.
+        // Hosted items (macOS 27) have no windows of their own; they're cut
+        // out of a picture of the bar instead.
         if items.allSatisfy(\.isHosted) {
+            if #available(macOS 27.0, *) {
+                let displayID = await appState.itemManager.itemCache.displayID
+                return await hostedCapture(items, displayID: displayID)
+            }
             var result = CaptureResult()
             result.excluded = items
             return result
@@ -253,6 +258,78 @@ final class MenuBarItemImageCache: ObservableObject {
         individualResult.images.merge(compositeResult.images) { (_, new) in new }
 
         return individualResult
+    }
+
+    /// Captures the given hosted items out of a picture of the menu bar on
+    /// the given display (macOS 27).
+    ///
+    /// The items are drawn in the display's menu bar window, but not into
+    /// its backing store: a window list capture of it comes out blank, and
+    /// one of the screen takes the bar's backdrop along. ScreenCaptureKit
+    /// pictures the window alone, items and all, on a clear background.
+    /// Items stacked in the system overflow aren't drawn, and are excluded.
+    @available(macOS 27.0, *)
+    private nonisolated func hostedCapture(_ items: [MenuBarItem], displayID: CGDirectDisplayID?) async -> CaptureResult {
+        var result = CaptureResult()
+        let displayBounds = CGDisplayBounds(displayID ?? CGMainDisplayID())
+        let scale = NSScreen.screens.first { $0.displayID == (displayID ?? CGMainDisplayID()) }?.backingScaleFactor ?? 2
+        guard
+            let barWindow = WindowInfo.createWindows(option: .onScreen).first(where: { window in
+                window.isWindowServerWindow && window.title == "Menubar" &&
+                    abs(window.bounds.minX - displayBounds.minX) < 1 && abs(window.bounds.minY - displayBounds.minY) < 1
+            }),
+            let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
+            let window = content.windows.first(where: { $0.windowID == barWindow.windowID })
+        else {
+            logger.debug("No menu bar window to picture the items in")
+            result.excluded = items
+            return result
+        }
+        let configuration = SCStreamConfiguration()
+        configuration.sourceRect = CGRect(origin: .zero, size: barWindow.bounds.size)
+        configuration.width = Int(barWindow.bounds.width * scale)
+        configuration.height = Int(barWindow.bounds.height * scale)
+        configuration.showsCursor = false
+        configuration.ignoreShadowsSingleWindow = true
+        configuration.shouldBeOpaque = false
+        configuration.captureResolution = .best
+        let picture: CGImage
+        do {
+            picture = try await SCScreenshotManager.captureImage(
+                contentFilter: SCContentFilter(desktopIndependentWindow: window),
+                configuration: configuration
+            )
+        } catch {
+            logger.error("Couldn't picture the menu bar: \(error, privacy: .public)")
+            result.excluded = items
+            return result
+        }
+        let pictureScale = CGFloat(picture.width) / barWindow.bounds.width
+        for item in items {
+            // The system's own items leave out the spacing around them that
+            // other items' slots include, so they'd sit tight against their
+            // neighbours.
+            let spacing: CGFloat = item.tag.namespace == .menuBarAgent ? 8 : 0
+            let local = item.bounds.insetBy(dx: -spacing, dy: 0)
+                .offsetBy(dx: -barWindow.bounds.minX, dy: -barWindow.bounds.minY)
+                .intersection(CGRect(origin: .zero, size: barWindow.bounds.size))
+            guard
+                item.hasSlot,
+                local.width >= 1,
+                let image = picture.cropping(to: CGRect(
+                    x: local.minX * pictureScale,
+                    y: local.minY * pictureScale,
+                    width: local.width * pictureScale,
+                    height: local.height * pictureScale
+                ).integral),
+                !image.isTransparent()
+            else {
+                result.excluded.append(item)
+                continue
+            }
+            result.images[item.tag] = CapturedImage(cgImage: image, scale: pictureScale)
+        }
+        return result
     }
 
     /// Renders a stand-in image for an item whose window can't be captured,
