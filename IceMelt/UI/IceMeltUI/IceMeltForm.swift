@@ -92,9 +92,15 @@ private struct IceMeltFormToggleStyle: ToggleStyle {
 
 extension EdgeInsets {
     /// The default padding for an ``IceMeltForm``.
+    ///
+    /// On macOS 26 the toolbar's own inset sets the content off from it.
+    /// On macOS 27 the content meets the toolbar's edge, so it's set off by
+    /// the spacing between sections instead.
     static let iceMeltFormDefaultPadding: EdgeInsets = {
         var insets = EdgeInsets(all: 20)
-        if #available(macOS 26.0, *) {
+        if #available(macOS 27.0, *) {
+            insets.top = .iceMeltFormDefaultSpacing
+        } else if #available(macOS 26.0, *) {
             insets.top = 0
         }
         return insets

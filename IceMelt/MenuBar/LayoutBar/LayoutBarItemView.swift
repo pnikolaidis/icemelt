@@ -65,7 +65,7 @@ final class LayoutBarItemView: NSView {
         self.appState = appState
 
         // set the frame to the full item frame size; the image will be centered when displayed
-        super.init(frame: CGRect(origin: .zero, size: item.bounds.size))
+        super.init(frame: CGRect(origin: .zero, size: item.boundsWithSpacing.size))
         unregisterDraggedTypes()
 
         self.toolTip = item.displayName

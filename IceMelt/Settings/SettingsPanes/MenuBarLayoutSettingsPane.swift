@@ -21,6 +21,9 @@ struct MenuBarLayoutSettingsPane: View {
         } else {
             IceMeltForm(spacing: 20) {
                 header
+                if itemManager.hostedSpacersNeedArranging {
+                    spacersNeedArranging
+                }
                 layoutBars
             }
         }
@@ -35,6 +38,35 @@ struct MenuBarLayoutSettingsPane: View {
                 Text("Items can also be arranged by ⌘ Command + dragging them in the menu bar.")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
+            }
+            .padding(15)
+        }
+    }
+
+    @ViewBuilder
+    private var spacersNeedArranging: some View {
+        IceMeltSection {
+            HStack(spacing: 15) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Some hidden items are still on the menu bar.")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(
+                        """
+                        To hide them on this display, IceMelt has to move blank spacers next to its divider. \
+                        While it does, your pointer disappears for a few seconds and the menu bar rearranges. \
+                        Don't move the mouse until it's done.
+                        """
+                    )
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button("Arrange Now") {
+                    if #available(macOS 27.0, *) {
+                        itemManager.arrangeHostedSpacers()
+                    }
+                }
             }
             .padding(15)
         }
