@@ -377,7 +377,13 @@ private struct MenuBarSearchContentView: View {
         closePanel()
         Task {
             try await Task.sleep(for: .milliseconds(25))
-            if Bridging.isWindowOnScreen(item.windowID) {
+            // On macOS 27 an item's window says nothing about whether it's
+            // on the bar, and an app hidden through the allowlist isn't
+            // drawn at all; showing it temporarily draws it first, or
+            // clicks it where it is.
+            if #available(macOS 27.0, *), MenuBarAllowlist.isAvailable, item.isHosted {
+                await itemManager.temporarilyShow(item: item, clickingWith: .left)
+            } else if Bridging.isWindowOnScreen(item.windowID) {
                 try await itemManager.click(item: item, with: .left)
             } else {
                 await itemManager.temporarilyShow(item: item, clickingWith: .left)

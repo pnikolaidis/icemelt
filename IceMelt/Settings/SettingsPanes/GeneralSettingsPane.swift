@@ -175,15 +175,30 @@ struct GeneralSettingsPane: View {
     @ViewBuilder
     private var iceMeltBarOptions: some View {
         useIceMeltBar
-        if settings.useIceMeltBar {
+        if settings.useIceMeltBar, !isIceMeltBarUnavailable {
             iceMeltBarLocationPicker
         }
     }
 
+    /// Whether sections are hidden through the allowlist (macOS 27), which
+    /// leaves the hidden apps undrawn, so the IceMelt Bar can't show them.
+    private var isIceMeltBarUnavailable: Bool {
+        if #available(macOS 27.0, *) {
+            return MenuBarAllowlist.isAvailable
+        }
+        return false
+    }
+
     @ViewBuilder
     private var useIceMeltBar: some View {
-        Toggle("Use IceMelt Bar", isOn: $settings.useIceMeltBar)
-            .annotation("Show hidden menu bar items in a separate bar below the menu bar.")
+        if isIceMeltBarUnavailable {
+            Toggle("Use IceMelt Bar", isOn: .constant(false))
+                .disabled(true)
+                .annotation("Not available on this version of macOS. Hidden menu bar items aren't drawn, so they show in the menu bar instead.")
+        } else {
+            Toggle("Use IceMelt Bar", isOn: $settings.useIceMeltBar)
+                .annotation("Show hidden menu bar items in a separate bar below the menu bar.")
+        }
     }
 
     @ViewBuilder

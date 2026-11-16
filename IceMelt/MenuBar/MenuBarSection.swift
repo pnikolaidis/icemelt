@@ -51,13 +51,22 @@ final class MenuBarSection {
     /// A timer that manages rehiding the section.
     private var rehideTimer: Timer?
 
+    /// When ``toggle(caller:line:)`` last changed the section's state.
+    private var lastToggle: ContinuousClock.Instant?
+
     /// An event monitor that handles starting the rehide timer when the mouse
     /// is outside of the menu bar.
     private var rehideMonitor: EventMonitor?
 
     /// A Boolean value that indicates whether the IceMelt Bar should be used.
+    ///
+    /// Not while sections are hidden through the allowlist (macOS 27): the
+    /// apps it hides aren't drawn, so the bar can't picture them.
     private var useIceMeltBar: Bool {
-        appState?.settings.general.useIceMeltBar ?? false
+        if #available(macOS 27.0, *), MenuBarAllowlist.isAvailable {
+            return false
+        }
+        return appState?.settings.general.useIceMeltBar ?? false
     }
 
     /// A weak reference to the menu bar manager.
@@ -194,6 +203,7 @@ final class MenuBarSection {
         // If we made it here, we're not using the IceMelt Bar.
         // Make sure it's closed.
         menuBarManager.iceMeltBarPanel.close()
+        appState?.itemManager.beginSectionTransition(opening: true)
 
         switch name {
         case .visible, .hidden:
@@ -206,6 +216,9 @@ final class MenuBarSection {
             }
         }
 
+        if #available(macOS 27.0, *) {
+            appState?.itemManager.updateMenuBarAllowlist()
+        }
         startRehideChecks()
         recacheAfterStateChange()
         setOverflowExpandedAfterReflow(true)
@@ -221,12 +234,24 @@ final class MenuBarSection {
             return
         }
         Task {
-            try? await Task.sleep(for: .milliseconds(500))
-            // The section may have changed state again meanwhile.
-            guard isHidden != expanded else {
-                return
+            // Closing is checked again while the bar settles: read too early,
+            // an overflow still opening looks closed, and stays open with the
+            // hidden items laid out over the application menu.
+            let delays: [Duration] = expanded ? [.milliseconds(500)] : [.milliseconds(500), .milliseconds(700), .milliseconds(1_000)]
+            for delay in delays {
+                try? await Task.sleep(for: delay)
+                // The section may have changed state again meanwhile.
+                guard isHidden != expanded else {
+                    return
+                }
+                await appState.itemManager.setHostedOverflowExpanded(expanded)
             }
-            await appState.itemManager.setHostedOverflowExpanded(expanded)
+            // Places the cover over the open overflow's » (see
+            // `OverflowChevronMask`) once the overflow has opened.
+            if expanded {
+                try? await Task.sleep(for: .milliseconds(300))
+                await appState.itemManager.cacheItemsRegardless()
+            }
         }
     }
 
@@ -239,6 +264,12 @@ final class MenuBarSection {
 
         menuBarManager.iceMeltBarPanel.close() // Make sure IceMelt Bar is always closed.
         menuBarManager.showOnHoverAllowed = true
+        if !useIceMeltBar {
+            appState?.itemManager.beginSectionTransition(opening: false)
+            if #available(macOS 27.0, *), name != .alwaysHidden {
+                appState?.itemManager.closeHostedOverflowAhead()
+            }
+        }
 
         switch name {
         case _ where useIceMeltBar, .visible, .hidden:
@@ -249,13 +280,31 @@ final class MenuBarSection {
             controlItem.state = .hideSection
         }
 
+        if #available(macOS 27.0, *) {
+            appState?.itemManager.updateMenuBarAllowlist()
+        }
         stopRehideChecks()
+        if !useIceMeltBar {
+            appState?.itemManager.restoreOverflowChevronCover()
+        }
         recacheAfterStateChange()
         setOverflowExpandedAfterReflow(false)
     }
 
     /// Toggles the visibility of the section.
+    ///
+    /// A toggle within 300ms of the last one is ignored. One click on the
+    /// menu bar can reach both the divider and the show-on-click handler
+    /// (macOS 27): the divider's frame is read only as the items are
+    /// cached, so while the bar reflows a click on it can read as one on
+    /// empty space, and the two toggles undo each other.
     func toggle(caller: String = #fileID, line: Int = #line) {
+        let now = ContinuousClock.now
+        if let lastToggle, lastToggle.duration(to: now) < .milliseconds(300) {
+            Logger.default.debug("Ignoring a second toggle of \(self.name.logString, privacy: .public) section (from \(caller, privacy: .public):\(line, privacy: .public))")
+            return
+        }
+        lastToggle = now
         if isHidden { show(caller: caller, line: line) } else { hide(caller: caller, line: line) }
     }
 
@@ -268,9 +317,14 @@ final class MenuBarSection {
         guard #available(macOS 27.0, *), let appState else {
             return
         }
+        // Read a few times while the bar settles, so the cover over the
+        // system's « (see `OverflowChevronMask`) follows it within moments
+        // rather than at the next scheduled read.
         Task {
-            try? await Task.sleep(for: .milliseconds(600))
-            await appState.itemManager.cacheItemsRegardless()
+            for delay: Duration in [.milliseconds(300), .milliseconds(400), .milliseconds(500), .milliseconds(800)] {
+                try? await Task.sleep(for: delay)
+                await appState.itemManager.cacheItemsRegardless()
+            }
         }
     }
 
