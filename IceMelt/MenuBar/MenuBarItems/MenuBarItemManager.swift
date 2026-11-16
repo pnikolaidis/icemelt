@@ -81,6 +81,13 @@ final class MenuBarItemManager: ObservableObject {
     /// spacer fitted. IceMelt reports a need only once the verdict has held.
     private var spacersMisplacedSince: ContinuousClock.Instant?
 
+    /// When the hidden section or the overflow last stopped being shown,
+    /// or an item was last clicked in the overflow (macOS 27). Spacers are
+    /// left alone for a while after: an open overflow or a shown section
+    /// makes them look misplaced, and a drag then hides the pointer in the
+    /// middle of what the user is doing.
+    private var lastHostedOverflowActivity: ContinuousClock.Instant?
+
     /// When the item manager was created: IceMelt doesn't report a need in
     /// the first seconds, while the bar is still settling after launch or login.
     private let createdAt = ContinuousClock.now
@@ -593,6 +600,11 @@ extension MenuBarItemManager {
                     items: items,
                     controlItems: controlItems
                 )
+                let isOverflowOrSectionShown = appState?.menuBarManager.section(withName: .hidden)?.isHidden == false ||
+                    items.contains { !$0.isControlItem && !$0.tag.isHostedSpacer && $0.hasSlot && !$0.isOnScreen }
+                if isOverflowOrSectionShown {
+                    lastHostedOverflowActivity = .now
+                }
                 dragMisplacedHostedSpacer(hostedSpacers, placements: hostedSpacerPlacements, controlItems: controlItems)
             }
         }
@@ -616,6 +628,7 @@ extension MenuBarItemManager {
         guard
             !isDraggingHostedSpacer, !isTemporarilyShowing, !isRehidingTemporarilyShownItems,
             temporarilyShownItemContexts.isEmpty, hostedShownSectionContexts.isEmpty,
+            lastHostedOverflowActivity.map({ $0.duration(to: .now) > .seconds(10) }) ?? true,
             divider.hasSlot, divider.isOnScreen
         else {
             if placements.values.contains(where: { $0 != .fits }) {
@@ -2082,6 +2095,11 @@ extension MenuBarItemManager {
         /// The number of attempts that have been made to rehide the item.
         var rehideAttempts = 0
 
+        /// The number of rounds of rehide attempts that failed. A hosted
+        /// item is given up on after a few: each try hides the pointer and
+        /// takes focus from the user.
+        var failedRehideRounds = 0
+
         /// When the item was temporarily shown.
         ///
         /// Used to cap how long a shown interface may defer the rehide.
@@ -2412,9 +2430,6 @@ extension MenuBarItemManager {
     ///   - item: The item to temporarily show.
     ///   - mouseButton: The mouse button to click the item with.
     func temporarilyShow(item: MenuBarItem, clickingWith mouseButton: CGMouseButton) async {
-        // On macOS 27 a hosted item is moved onto the bar beside the visible
-        // items, as before, so only it appears rather than the whole
-        // overflow; if that fails, it's clicked in the expanded overflow.
         // An item being moved back finishes first (see
         // ``isTemporarilyShowing``).
         let rehideDeadline = ContinuousClock.now + .seconds(20)
@@ -2423,6 +2438,14 @@ extension MenuBarItemManager {
         }
         guard let appState else {
             logger.error("Missing AppState, so not showing \(item.logString, privacy: .public)")
+            return
+        }
+        // A hosted item is clicked where the expanded overflow lays it out.
+        // Moving it beside the visible items took several ⌘-drags on a wide
+        // display, each hiding the pointer and taking focus, and moving it
+        // back often failed.
+        if item.isHosted {
+            await showHostedInOverflow(item, clickingWith: mouseButton)
             return
         }
         guard let screen = NSScreen.screenWithActiveMenuBar else {
@@ -2657,7 +2680,12 @@ extension MenuBarItemManager {
                     // Failed contexts are ultimately added back to the array
                     // and rehidden after a longer delay, so reset the count.
                     context.rehideAttempts = 0
-                    failedContexts.append(context)
+                    context.failedRehideRounds += 1
+                    if item.isHosted, context.failedRehideRounds >= 3 {
+                        logger.error("Giving up rehiding \(item.logString, privacy: .public)")
+                    } else {
+                        failedContexts.append(context)
+                    }
                 }
             }
         }
@@ -2855,6 +2883,10 @@ extension MenuBarItemManager {
         guard let appState else {
             logger.error("Missing AppState, so not showing \(item.logString, privacy: .public)")
             return
+        }
+        lastHostedOverflowActivity = .now
+        defer {
+            lastHostedOverflowActivity = .now
         }
         let menuBarManager = appState.menuBarManager
         let sectionName = itemCache.address(for: item.tag)?.section ?? .hidden
