@@ -1,0 +1,49 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>IceMelt 26</title>
+        <item>
+            <title>IceMelt 26 — end of the project</title>
+            <pubDate>Fri, 27 Nov 2026 12:00:00 -0500</pubDate>
+            <sparkle:version>1134</sparkle:version>
+            <sparkle:shortVersionString>26 (Final)</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:informationalUpdate/>
+            <link>https://github.com/pnikolaidis/icemelt#readme</link>
+            <description><![CDATA[
+                <h2>IceMelt 26 is complete</h2>
+                <p>IceMelt set out to make Ice work on macOS 26 (Tahoe), and it does. macOS 27's rebuilt menu bar now handles basic icon hiding on its own, so the project has ended.</p>
+                <ul>
+                    <li>Your installed version (2026.4.2) is the final release. Nothing new to download.</li>
+                    <li>On macOS 26, it keeps working as it does today.</li>
+                    <li>On macOS 27, it runs as-is but gets no further fixes. Try the built-in menu bar features first: ⌘-drag icons to reorder, then let the « collapse the rest.</li>
+                </ul>
+                <p>Thanks for using IceMelt. Choose “Learn More” to read the details, or “Skip This Version” to stop seeing this notice.</p>
+            ]]></description>
+        </item>
+        <item>
+            <title>2026.4.2</title>
+            <pubDate>Mon, 16 Nov 2026 07:30:35 -0500</pubDate>
+            <sparkle:version>1133</sparkle:version>
+            <sparkle:shortVersionString>2026.4.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/pnikolaidis/icemelt/releases/download/v2026.4.2/IceMelt-2026.4.2.dmg" length="6391251" type="application/octet-stream" sparkle:edSignature="8nMu1mnjDzCGqFnwszMdiWIZVV1b4jGz9FSaHwusbLkIHPsQ8oFTnZTmsng/SRCMkrv+z+A6FJe0RHFfcOFxBg=="/>
+        </item>
+        <item>
+            <title>2026.4.1</title>
+            <pubDate>Wed, 28 Oct 2026 11:13:24 -0400</pubDate>
+            <sparkle:version>1132</sparkle:version>
+            <sparkle:shortVersionString>2026.4.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/pnikolaidis/icemelt/releases/download/v2026.4.1/IceMelt-2026.4.1.dmg" length="6067691" type="application/octet-stream" sparkle:edSignature="3/qwMMgj7xpAaRatbjRL1trgF3qI6/Uy9xRal8OvqL6z46HwTgaaw7bEhDT4hMlrOTSrZ7IK2/+Jh7cirC3mBA=="/>
+        </item>
+        <item>
+            <title>2026.4.0</title>
+            <pubDate>Mon, 05 Oct 2026 21:27:51 -0400</pubDate>
+            <sparkle:version>1131</sparkle:version>
+            <sparkle:shortVersionString>2026.4.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/pnikolaidis/icemelt/releases/download/v2026.4.0/IceMelt-2026.4.0.dmg" length="6370691" type="application/octet-stream" sparkle:edSignature="rKXb8APMGqZFm3UWt7hpy/5tSsyPvspr2e69NW7rdEw7IGQXlUH0wGQ3bpS60Rb7LsC489bJTo6SvDNHSCqYAQ=="/>
+        </item>
+    </channel>
+</rss>
