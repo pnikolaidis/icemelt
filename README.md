@@ -1,11 +1,11 @@
 <div align="center">
     <img src="IceMelt/Resources/Assets.xcassets/AppIcon.appiconset/icon_256x256.png" width=200 height=200>
-    <h1>IceMelt</h1>
+    <h1>IceMelt 26</h1>
 </div>
 
 IceMelt is a menu bar management tool for macOS. Its primary function is hiding and showing menu bar items, alongside a range of additional features that make it one of the most versatile menu bar tools available.
 
-IceMelt is a fork of [Ice](https://github.com/jordanbaird/Ice) by Jordan Baird, maintained by [Scratch Itch Software](https://scratchitchsoftware.com/icemelt). It exists to deliver a stable, actively maintained build for **macOS 26 (Tahoe) and later** — see [What IceMelt changes](#what-icemelt-changes) below.
+IceMelt is a fork of [Ice](https://github.com/jordanbaird/Ice) by Jordan Baird, maintained by [Scratch Itch Software](https://scratchitchsoftware.com/icemelt). It delivered a stable build for **macOS 26 (Tahoe)** — see [What IceMelt changes](#what-icemelt-changes) below.
 
 [![Download](https://img.shields.io/badge/download-latest-brightgreen?style=flat-square)](https://github.com/pnikolaidis/icemelt/releases/latest)
 ![Platform](https://img.shields.io/badge/platform-macOS-blue?style=flat-square)
@@ -13,10 +13,14 @@ IceMelt is a fork of [Ice](https://github.com/jordanbaird/Ice) by Jordan Baird, 
 [![Website](https://img.shields.io/badge/Website-015FBA?style=flat-square)](https://scratchitchsoftware.com/icemelt)
 [![License](https://img.shields.io/github/license/pnikolaidis/icemelt?style=flat-square)](LICENSE)
 
-> [!NOTE]
-> IceMelt is in active development. Download the latest release [here](https://github.com/pnikolaidis/icemelt/releases/latest), and see the roadmap below for upcoming work.
+> [!IMPORTANT]
+> **IceMelt 26 is complete and no longer maintained.** IceMelt set out to make Ice work on macOS 26 (Tahoe), and it does. macOS 27's rebuilt menu bar now covers basic icon hiding on its own (⌘-drag to reorder, then let the « collapse the rest), so the project has ended.
 >
-> **What's new:** macOS 27 support and a round of fixes. See the [announcement](https://github.com/pnikolaidis/icemelt/discussions/57).
+> - **On macOS 26:** the [final release](https://github.com/pnikolaidis/icemelt/releases/latest) keeps working. No further updates are planned.
+> - **On macOS 27:** the final release runs as-is (it includes the [macOS 27 fixes](https://github.com/pnikolaidis/icemelt/discussions/57)), but it gets no further fixes. Try the built-in menu bar features first. See [macOS 27: what changed](#macos-27-what-changed-and-what-icemelt-still-adds).
+> - **Looking for an active project?** See [upstream Ice](https://github.com/jordanbaird/Ice).
+>
+> This repository is archived: issues and pull requests are closed, and releases stay available.
 
 ## Install
 
@@ -91,57 +95,43 @@ The « you see is always macOS's own. IceMelt drives it from the outside, with c
 
 **In short:** on a MacBook with many menu bar icons, macOS 27 now covers basic hiding by itself: reorder with ⌘-drag and let the « do the rest. IceMelt is still worth it if you use a large display, want an always-hidden section, want hidden icons below the menu bar instead of at the far left, or use its hover, hotkey, search or appearance features.
 
-## Features/Roadmap
+## Features
 
 ### Menu bar item management
 
-- [x] Hide menu bar items
-- [x] "Always-hidden" menu bar section
-- [x] Show hidden menu bar items when hovering over the menu bar
-- [x] Show hidden menu bar items when an empty area in the menu bar is clicked
-- [x] Show hidden menu bar items by scrolling or swiping in the menu bar
-- [x] Automatically rehide menu bar items
-- [x] Hide application menus when they overlap with shown menu bar items
-- [x] Drag and drop interface to arrange individual menu bar items
-- [x] Display hidden menu bar items in a separate bar (e.g. for MacBooks with the notch)
-- [x] Search menu bar items
-- [x] Menu bar item spacing (BETA)
-- [ ] Canonical menu bar order with background reconciliation
-- [ ] Profiles for menu bar layout
-- [ ] Individual spacer items
-- [ ] Menu bar item groups
-- [ ] Show menu bar items when trigger conditions are met
+- Hide menu bar items
+- "Always-hidden" menu bar section
+- Show hidden menu bar items when hovering over the menu bar
+- Show hidden menu bar items when an empty area in the menu bar is clicked
+- Show hidden menu bar items by scrolling or swiping in the menu bar
+- Automatically rehide menu bar items
+- Hide application menus when they overlap with shown menu bar items
+- Drag and drop interface to arrange individual menu bar items
+- Display hidden menu bar items in a separate bar (e.g. for MacBooks with the notch)
+- Search menu bar items
+- Menu bar item spacing (BETA)
 
 ### Menu bar appearance
 
-- [x] Menu bar tint (solid and gradient)
-- [x] Menu bar shadow
-- [x] Menu bar border
-- [x] Custom menu bar shapes (rounded and/or split)
-- [x] Different settings for light/dark mode ("dynamic appearance")
-- [ ] Remove background behind menu bar
-- [ ] Rounded screen corners
-- [ ] Full-black menu bar to hide the notch
+- Menu bar tint (solid and gradient)
+- Menu bar shadow
+- Menu bar border
+- Custom menu bar shapes (rounded and/or split)
+- Different settings for light/dark mode ("dynamic appearance")
 
 ### Hotkeys
 
-- [x] Toggle individual menu bar sections
-- [x] Show the search panel
-- [x] Enable/disable the IceMelt Bar
-- [x] Show/hide section divider icons
-- [x] Toggle application menus
-- [ ] Enable/disable auto rehide
-- [ ] Temporarily show individual menu bar items
+- Toggle individual menu bar sections
+- Show the search panel
+- Enable/disable the IceMelt Bar
+- Show/hide section divider icons
+- Toggle application menus
 
 ### Other
 
-- [x] Launch at login
-- [x] Automatic updates
-- [x] Usable without Screen Recording permission (degraded item previews)
-- [ ] Per-display behavior
-- [ ] Settings export/import
-- [ ] Automated test coverage
-- [ ] Menu bar widgets
+- Launch at login
+- Automatic updates
+- Usable without Screen Recording permission (degraded item previews)
 
 ## Why does IceMelt only support macOS 26 and later?
 
@@ -179,11 +169,9 @@ Tint, shadow, border, and custom menu bar shapes, with separate settings for lig
 
 ## Contributing
 
-Bug reports and feature requests belong in [IceMelt's issue tracker](https://github.com/pnikolaidis/icemelt/issues) — please don't file IceMelt problems on upstream Ice.
+IceMelt 26 is no longer maintained and does not accept issues or pull requests. Please don't file IceMelt problems on upstream Ice. Known issues remain documented in [FREQUENT_ISSUES.md](FREQUENT_ISSUES.md).
 
-Before reporting a bug, check [FREQUENT_ISSUES.md](FREQUENT_ISSUES.md). Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
-
-Development happens on the `melt` branch (the default); `main` is kept in sync with it. Upstream Ice remains available as a git remote for cherry-picking. CI runs SwiftLint and a Release build on every push and pull request.
+The source stays available under the GPL; forks are welcome. Development happened on the `melt` branch.
 
 ## License
 
